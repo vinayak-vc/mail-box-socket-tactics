@@ -95,6 +95,23 @@ MailBox Socket Tactics is an asynchronous, event-driven coordination, notificati
   - **CodexAdapter:** Uses `codex.exe exec resume --last "<prompt>"`.
   - **AntigravityAdapter:** Uses `language_server.exe agentapi send-message <id> "<prompt>"`.
 
+### J. Shared Domain Services Layer (`src/domain/`)
+- Centralized business logic shared across the REST API, WebSocket broker, and MCP server:
+  - **MailboxDomainService:** Thread history, message retrieval by ID, recipient filtering, and mutexed posting.
+  - **TaskDomainService:** Atomic claims, status transitions (`CLAIMED` -> `RUNNING`), evidence-backed completion, retries, cancellation, and task timeline history.
+  - **AgentDomainService:** Registry operations, pause/resume assignments, dynamic telemetry calculation, and secret-free prompt generation.
+  - **UsageDomainService:** Compute duration, token volume estimation, and transparent subscription quota monitoring with confidence states.
+
+### K. Shared MCP Server (`src/mcp/McpServer.js`)
+- Standard JSON-RPC 2.0 stdio server for desktop AI applications (Claude Desktop, Codex Desktop, Antigravity Desktop).
+- Enforces process-bound agent identity (`--agent Claude|Codex|Antigravity`).
+- Exposes 15 authorized domain tools, 3 documentation resources (`mailsocket://protocol`, `mailsocket://roles`, `mailsocket://schemas`), and the `team_onboarding` prompt template.
+- Implements bounded timeout waiting via `wait_for_message` without phantom autonomous background waking.
+
+### L. Dual-Mode Local & Public Remote Access (Zrok)
+- Companion HTTP server (:8766) handles both REST/Dashboard traffic and HTTP `Upgrade: websocket`.
+- Enables full-duplex dashboard control and live WebSocket events both locally (`http://127.0.0.1:8766`) and over public secure zrok tunnels (`https://*.shares.zrok.io`) without secondary tunnel ports.
+
 ---
 
 ## 3. Real-Time Telemetry & Token Efficiency

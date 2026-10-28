@@ -45,10 +45,22 @@ The **MailSocketTactics Control Center** is a desktop-focused web application bu
    - Step 4: Persistent registration to `data/agent_registry.json`.
    - Step 5: Onboarding status lifecycle tracking.
 8. **System Settings:** Network ports, auth token masking, mutex configuration, and system snapshot export.
+9. **AI Usage & Quota Monitor:** Section 11 transparent monitoring tracking task counts, compute duration, token volumes, and quota states (`Available`, `Estimated`, `Unavailable`, `Stale`) with explicit zero-scrape declarations.
 
 ---
 
-## 3. Directory Layout
+## 3. Shared MCP Server Integration
+
+MailSocketTactics includes a single, reusable **Model Context Protocol (MCP)** server (`src/mcp/McpServer.js`) over `stdio` implementing JSON-RPC 2.0. It exposes 15 authorized mailbox and task tools, 3 protocol resources, and custom onboarding prompts to:
+- **Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`)
+- **Codex Desktop** (`C:\Users\<User>\.codex\config.toml`)
+- **Google Antigravity Desktop** (`.gemini/antigravity/mcp/mailsocket/`)
+
+See [`Documentation/MCP_GUIDE.md`](file:///C:/UnrealProject/MailBoxSocketTactics/Documentation/MCP_GUIDE.md) for full configuration blocks, tool parameters, and desktop execution boundaries.
+
+---
+
+## 4. Directory Layout
 
 ```text
 MailBoxSocketTactics/
@@ -58,12 +70,20 @@ MailBoxSocketTactics/
 ├── client/                           # React + TypeScript + Vite Dashboard
 │   ├── src/
 │   │   ├── components/               # Sidebar, TopNav
-│   │   ├── views/                    # Overview, Agents, Tasks, Mailbox, Logs, AddAgent, Settings
+│   │   ├── views/                    # Overview, Agents, Tasks, Mailbox, Logs, AddAgent, AiUsage, Settings
 │   │   ├── api.ts                    # Real-time WebSocket & REST client
 │   │   └── types.ts                  # Shared data schemas
 │   ├── dist/                         # Pre-built static UI assets (served on :8766)
 │   └── vite.config.ts
 ├── src/
+│   ├── domain/                       # Shared business logic & domain services
+│   │   ├── MailboxDomainService.js   # Mailbox parsing, recipient routing & atomic writes
+│   │   ├── TaskDomainService.js      # Claims, lifecycle transitions, retries & completion
+│   │   ├── AgentDomainService.js     # Agent registry, pause/resume & secret-free onboarding
+│   │   ├── UsageDomainService.js     # Compute duration, token metrics & quota confidence
+│   │   └── index.js                  # Central domain service container
+│   ├── mcp/
+│   │   └── McpServer.js              # Standard JSON-RPC 2.0 stdio MCP server for Desktop apps
 │   ├── broker/
 │   │   ├── EventBroker.js            # WebSocket & HTTP Event Broker daemon with API routes
 │   │   ├── AgentRegistry.js          # Persistent data/agent_registry.json manager
@@ -91,18 +111,22 @@ MailBoxSocketTactics/
 ├── tests/
 │   ├── test_suite.js                 # 20/20 automated broker/adapter verification suite
 │   ├── test_dashboard_suite.js       # 20/20 automated Control Center verification suite
+│   ├── test_zrok_suite.js            # 5/5 automated zrok public tunneling suite
+│   ├── test_domain_suite.js          # 12/12 automated domain services suite
+│   ├── test_mcp_suite.js             # 13/13 automated MCP protocol & tool suite
 │   └── test_powershell_integration.ps1 # 5/5 end-to-end PowerShell script tests
 └── Documentation/
     ├── ARCHITECTURE.md               # System architecture and data flow diagrams
+    ├── MCP_GUIDE.md                  # Comprehensive desktop MCP integration guide
     ├── API_REFERENCE.md              # REST & WebSocket API specification
     ├── MESSAGE_PROTOCOL.md           # Event specifications, lease lifecycles, DLQ
     ├── MIGRATION_GUIDE.md            # Step-by-step migration from 300s polling
-    └── VERIFICATION_REPORT.md        # Comprehensive test execution evidence (45/45 tests passing)
+    └── VERIFICATION_REPORT.md        # Comprehensive test execution evidence
 ```
 
 ---
 
-## 4. Verification & Testing
+## 5. Verification & Testing
 
 Run all automated test suites:
 ```cmd
@@ -112,12 +136,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\test_powershell_integr
 
 - **Broker / Adapter Suite (`tests/test_suite.js`):** 20/20 Passed
 - **Control Center Suite (`tests/test_dashboard_suite.js`):** 20/20 Passed
+- **Zrok Dual-Mode Suite (`tests/test_zrok_suite.js`):** 5/5 Passed
+- **Domain Services Suite (`tests/test_domain_suite.js`):** 12/12 Passed
+- **Shared MCP Suite (`tests/test_mcp_suite.js`):** 13/13 Passed
 - **PowerShell Integration Suite (`tests/test_powershell_integration.ps1`):** 5/5 Passed
-- **Total:** **45 / 45 deterministic tests passing.**
+- **Total:** **75 / 75 deterministic tests passing.**
 
 ---
 
-## 5. Windows Service Commands
+## 6. Windows Service Commands
 
 | Action | PowerShell Command |
 |---|---|

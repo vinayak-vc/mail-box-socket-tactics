@@ -7,6 +7,7 @@ import { TaskQueueView } from './views/TaskQueueView';
 import { MailboxView } from './views/MailboxView';
 import { MessageLogsView } from './views/MessageLogsView';
 import { ActivityTimelineView } from './views/ActivityTimelineView';
+import { AiUsageView } from './views/AiUsageView';
 import { AddAgentWizard } from './views/AddAgentWizard';
 import { SettingsView } from './views/SettingsView';
 import { SystemSnapshot } from './types';
@@ -69,6 +70,8 @@ export const App: React.FC = () => {
         return <MessageLogsView snapshot={snapshot} />;
       case 'timeline':
         return <ActivityTimelineView snapshot={snapshot} />;
+      case 'ai-usage':
+        return <AiUsageView snapshot={snapshot} onRefresh={refreshSnapshot} />;
       case 'add-agent':
         return <AddAgentWizard onAgentAdded={refreshSnapshot} />;
       case 'settings':

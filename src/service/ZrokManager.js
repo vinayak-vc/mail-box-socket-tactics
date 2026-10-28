@@ -88,19 +88,89 @@ class ZrokManager {
   }
 
   /**
-   * Queries existing shares via zrok list shares --json
+   * Queries existing shares via zrok list shares --json or overview --json
    */
   listShares() {
     try {
-      const jsonStr = execSync(`"${this.binPath}" list shares --json`, {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 10000
-      });
-      const data = JSON.parse(jsonStr);
-      return data.shares || [];
+      let jsonStr = '';
+      try {
+        jsonStr = execSync(`"${this.binPath}" list shares --json`, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 8000
+        });
+      } catch (_) {
+        jsonStr = execSync(`"${this.binPath}" overview --json`, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 8000
+        });
+      }
+
+      if (!jsonStr || !jsonStr.trim()) return [];
+      const data = JSON.parse(jsonStr.trim());
+      if (Array.isArray(data.shares)) {
+        return data.shares;
+      }
+      if (Array.isArray(data.environments)) {
+        const allShares = [];
+        for (const env of data.environments) {
+          if (Array.isArray(env.shares)) {
+            allShares.push(...env.shares);
+          }
+        }
+        return allShares;
+      }
+      return [];
     } catch (_) {
       return [];
+    }
+  }
+
+  /**
+   * Deletes / releases a share token from the zrok cloud controller
+   */
+  deleteShare(token) {
+    if (!token) return;
+    try {
+      // Try zrok2 syntax first
+      execSync(`"${this.binPath}" delete share ${token}`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 8000
+      });
+      this.logger.log(`[ZrokManager] Released zrok cloud share '${token}'.`);
+    } catch (_) {
+      try {
+        // Fallback to legacy zrok v0.4 release syntax
+        execSync(`"${this.binPath}" release ${token}`, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 8000
+        });
+        this.logger.log(`[ZrokManager] Released zrok share '${token}' using legacy syntax.`);
+      } catch (err) {
+        this.logger.warn(`[ZrokManager] Could not release share '${token}': ${err.message}`);
+      }
+    }
+  }
+
+  /**
+   * Cleans up all stale unreserved shares targeting this.target
+   */
+  cleanupStaleShares() {
+    try {
+      const normalizedTarget = this.target.replace(/\/+$/, '');
+      const shares = this.listShares();
+      for (const share of shares) {
+        const sTarget = (share.target || share.backendProxyEndpoint || '').replace(/\/+$/, '');
+        if (sTarget === normalizedTarget && share.shareToken && !share.reserved) {
+          this.logger.log(`[ZrokManager] Cleaning up stale share '${share.shareToken}' targeting ${sTarget}...`);
+          this.deleteShare(share.shareToken);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`[ZrokManager] Stale share cleanup error: ${err.message}`);
     }
   }
 
@@ -124,12 +194,10 @@ class ZrokManager {
       return null;
     }
 
-    const normalizedTarget = this.target.replace(/\/+$/, '');
+    // Pre-flight cleanup: release all lingering stale shares targeting our port
+    this.cleanupStaleShares();
 
-    // Snapshot existing share tokens before spawning to guarantee picking ONLY the new share
-    const existingTokens = new Set(
-      this.listShares().map((s) => s.shareToken).filter(Boolean)
-    );
+    const normalizedTarget = this.target.replace(/\/+$/, '');
 
     try {
       // Spawn headless share process
@@ -170,22 +238,14 @@ class ZrokManager {
         }
 
         const shares = this.listShares();
-        // Priority 1: Newly created share whose token was not present before spawn
-        let matchingShare = shares.find((s) => {
-          const sTarget = (s.target || '').replace(/\/+$/, '');
-          return sTarget === normalizedTarget && s.shareMode === 'public' && !existingTokens.has(s.shareToken);
-        });
+        const matchingShares = shares
+          .filter((s) => {
+            const sTarget = (s.target || s.backendProxyEndpoint || '').replace(/\/+$/, '');
+            return sTarget === normalizedTarget && s.shareMode === 'public';
+          })
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-        // Fallback: If existingTokens already had it (e.g. restart), pick newest by createdAt
-        if (!matchingShare) {
-          const allMatching = shares
-            .filter((s) => {
-              const sTarget = (s.target || '').replace(/\/+$/, '');
-              return sTarget === normalizedTarget && s.shareMode === 'public';
-            })
-            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-          matchingShare = allMatching[0];
-        }
+        const matchingShare = matchingShares[0];
 
         if (matchingShare && matchingShare.frontendEndpoints && matchingShare.frontendEndpoints.length > 0) {
           this.shareToken = matchingShare.shareToken;
@@ -225,14 +285,9 @@ class ZrokManager {
     }
 
     if (tokenToDelete) {
-      try {
-        execSync(`"${this.binPath}" delete share ${tokenToDelete}`, {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-          timeout: 8000
-        });
-      } catch (_) {}
+      this.deleteShare(tokenToDelete);
     }
+    this.cleanupStaleShares();
 
     this.publicUrl = null;
     this.shareToken = null;

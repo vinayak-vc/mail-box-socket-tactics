@@ -23,6 +23,42 @@ function Get-ServicePid {
     return $null
 }
 
+function Release-ZrokShares {
+    $zrokBin = (Get-Command zrok2 -ErrorAction SilentlyContinue).Source
+    if (-not $zrokBin) { $zrokBin = (Get-Command zrok -ErrorAction SilentlyContinue).Source }
+    if (-not $zrokBin -and (Test-Path "C:\scrcpy-win64-v2.4\zrok2.exe")) { $zrokBin = "C:\scrcpy-win64-v2.4\zrok2.exe" }
+    if ($zrokBin) {
+        try {
+            $rawJson = cmd /c "`"$zrokBin`" list shares --json 2>nul"
+            if (-not $rawJson) { $rawJson = cmd /c "`"$zrokBin`" overview --json 2>nul" }
+            if ($rawJson) {
+                $str = $rawJson -join "`n"
+                $sIdx = $str.IndexOf('{')
+                $eIdx = $str.LastIndexOf('}')
+                if ($sIdx -ge 0 -and $eIdx -gt $sIdx) {
+                    $jsonStr = $str.Substring($sIdx, $eIdx - $sIdx + 1)
+                    $parsed = $jsonStr | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    $sharesList = @()
+                    if ($parsed.shares) { $sharesList = $parsed.shares }
+                    elseif ($parsed.environments) {
+                        foreach ($env in $parsed.environments) {
+                            if ($env.shares) { $sharesList += $env.shares }
+                        }
+                    }
+                    foreach ($s in $sharesList) {
+                        $tgt = if ($s.target) { $s.target } else { $s.backendProxyEndpoint }
+                        if ($tgt -match ':8766' -and -not $s.reserved) {
+                            Write-Host "[ServiceControl] Releasing zrok cloud share $($s.shareToken)..." -ForegroundColor Cyan
+                            cmd /c "`"$zrokBin`" delete share $($s.shareToken) 2>nul" | Out-Null
+                            cmd /c "`"$zrokBin`" release $($s.shareToken) 2>nul" | Out-Null
+                        }
+                    }
+                }
+            }
+        } catch {}
+    }
+}
+
 switch ($Action) {
     'status' {
         $pidVal = Get-ServicePid
@@ -38,6 +74,11 @@ switch ($Action) {
         $pidVal = Get-ServicePid
         if ($pidVal) {
             Write-Host "[ServiceControl] Stopping service (PID $pidVal)..."
+            # Gracefully attempt HTTP stop first
+            try {
+                Invoke-RestMethod -Uri "http://127.0.0.1:8766/api/service/control" -Method Post -Body '{"action":"stop","target":"all"}' -ContentType 'application/json' -TimeoutSec 2 -ErrorAction SilentlyContinue | Out-Null
+                Start-Sleep -Seconds 1
+            } catch {}
             node $serviceRunner --stop
             Start-Sleep -Seconds 1
             if (Test-Path $pidFile) { Remove-Item $pidFile -Force -ErrorAction SilentlyContinue }
@@ -45,11 +86,11 @@ switch ($Action) {
         } else {
             Write-Host "[ServiceControl] Service is not running." -ForegroundColor Yellow
         }
-        # Clean up any orphan zrok processes sharing port 8766
-        Get-CimInstance Win32_Process -Filter "Name LIKE '%zrok%'" -ErrorAction SilentlyContinue | ForEach-Object {
-            if ($_.CommandLine -match '8766') {
-                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-            }
+        # Release all zrok cloud shares targeting port 8766
+        Release-ZrokShares
+        # Clean up any lingering zrok processes
+        Get-Process *zrok* -ErrorAction SilentlyContinue | ForEach-Object {
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -59,6 +100,9 @@ switch ($Action) {
             Write-Host "[ServiceControl] Service is already running (PID $pidVal)." -ForegroundColor Yellow
             return
         }
+
+        # Pre-flight: release any stale shares and clean lingering processes
+        Release-ZrokShares
 
         Write-Host "[ServiceControl] Starting service in mode --$Mode..."
         $cmdLine = "node.exe `"$serviceRunner`" --$Mode"

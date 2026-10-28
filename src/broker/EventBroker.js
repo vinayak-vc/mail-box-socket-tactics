@@ -63,6 +63,18 @@ class EventBroker {
       httpPort: this.httpPort
     });
 
+    // Domain services layer
+    const { createDomainServices } = require('../domain');
+    this.domainServices = createDomainServices({
+      mailboxPath: config.mailbox ? config.mailbox.path : null,
+      httpPort: this.httpPort,
+      stateStore: this.stateStore,
+      agentRegistry: this.agentRegistry,
+      telemetryMap: this.agentTelemetry,
+      logger: this.logger,
+      onEvent: (eventType, data) => this.broadcastDashboardEvent(eventType, data)
+    });
+
     // Client connection state
     this.clients = new Map(); // socket -> { agentId, subscriptions: Set, isAlive, connectedAt, workerId }
     this.agentTelemetry = new Map(); // normalizedId -> telemetry state
@@ -1060,6 +1072,7 @@ class EventBroker {
             failedCount: allTasks.filter(t => t.status === PROCESSING_STATUS.FAILED).length,
             deadLetterCount: deadLetters.length
           },
+          usage: this.domainServices ? this.domainServices.usageService.getUsageSummary() : null,
           logs: this.logger.getEvents({ limit: 100 })
         };
 
@@ -1240,6 +1253,22 @@ class EventBroker {
       return res.end(JSON.stringify({ success: true, taskId }));
     }
 
+    // 11b. GET /api/tasks/:id/history (Get task lifecycle and attempt history)
+    const taskHistMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/history$/);
+    if (req.method === 'GET' && taskHistMatch) {
+      const taskId = decodeURIComponent(taskHistMatch[1]);
+      const history = this.domainServices ? this.domainServices.taskService.getTaskHistory(taskId) : { messageId: taskId, events: [] };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(history));
+    }
+
+    // 11c. GET /api/usage (AI Usage and Quota Monitoring, Section 11)
+    if (req.method === 'GET' && url.pathname === '/api/usage') {
+      const summary = this.domainServices ? this.domainServices.usageService.getUsageSummary() : {};
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(summary));
+    }
+
     // 12. GET /api/mailbox (Get messages parsed from TEAM_MAILBOX.md)
     if (req.method === 'GET' && url.pathname === '/api/mailbox') {
       this.getMailboxMessages().then(messages => {
@@ -1249,6 +1278,29 @@ class EventBroker {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       });
+      return;
+    }
+
+    // 12b. GET /api/mailbox/:id (Get single message by ID)
+    const mailboxMsgMatch = url.pathname.match(/^\/api\/mailbox\/([^/]+)$/);
+    if (req.method === 'GET' && mailboxMsgMatch) {
+      const msgId = decodeURIComponent(mailboxMsgMatch[1]);
+      if (this.domainServices) {
+        this.domainServices.mailboxService.getMessageById(msgId).then(msg => {
+          if (!msg) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: `Message '${msgId}' not found` }));
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(msg));
+        }).catch(err => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Domain services not initialized' }));
+      }
       return;
     }
 

@@ -134,4 +134,40 @@ export interface SystemSnapshot {
     deadLetterCount: number;
   };
   logs: ActivityEvent[];
+  usage?: UsageSummary | null;
+}
+
+export interface QuotaItem {
+  state: 'Available' | 'Estimated' | 'Unavailable' | 'Stale';
+  value: string | number | null;
+  resetTime?: string | null;
+  note: string;
+}
+
+export interface AgentQuota {
+  agentId: string;
+  displayName: string;
+  vendor: string;
+  tier: string;
+  fiveHourQuota: QuotaItem;
+  weeklyQuota: QuotaItem;
+  taskMetrics: {
+    state: 'Available' | 'Estimated' | 'Unavailable' | 'Stale';
+    tasksExecuted: number;
+    totalComputeMs: number;
+    estimatedTokens: number;
+    lastActiveAt?: string | null;
+    source: string;
+    confidence: string;
+  };
+}
+
+export interface UsageSummary {
+  timestamp: string;
+  quotas: AgentQuota[];
+  aggregated: {
+    totalTasks: number;
+    totalComputeDurationMs: number;
+    totalEstimatedTokens: number;
+  };
 }

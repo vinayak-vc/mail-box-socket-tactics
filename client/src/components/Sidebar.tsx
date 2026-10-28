@@ -7,7 +7,8 @@ import {
   FileText, 
   Activity, 
   UserPlus, 
-  Settings 
+  Settings,
+  Zap 
 } from 'lucide-react';
 import { SystemSnapshot } from '../types';
 
@@ -18,6 +19,7 @@ export type NavTab =
   | 'mailbox' 
   | 'logs' 
   | 'timeline' 
+  | 'ai-usage'
   | 'add-agent' 
   | 'settings';
 
@@ -39,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, snapsh
     { id: 'mailbox', label: 'Mailbox', icon: Mail, badge: totalMessagesCount ? `${totalMessagesCount}` : undefined },
     { id: 'logs', label: 'Message Logs', icon: FileText },
     { id: 'timeline', label: 'Activity Timeline', icon: Activity },
+    { id: 'ai-usage', label: 'AI Usage', icon: Zap },
     { id: 'add-agent', label: 'Add AI Agent', icon: UserPlus },
     { id: 'settings', label: 'System Settings', icon: Settings },
   ];

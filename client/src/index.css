@@ -300,10 +300,12 @@ body {
 }
 
 /* Page Content View */
-.content-view {
+.content-view,
+.view-container {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
+  min-height: 0;
 }
 
 /* Grid & Cards */

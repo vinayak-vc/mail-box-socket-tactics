@@ -3,7 +3,7 @@
  * Real-time WebSocket connection manager and REST client for MailSocketTactics Control Center.
  */
 
-import { SystemSnapshot, Agent, Task, ActivityEvent } from './types';
+import { SystemSnapshot, Agent, Task, ActivityEvent, UsageSummary } from './types';
 
 const isViteDev = window.location.port === '5173';
 const API_BASE = isViteDev ? 'http://127.0.0.1:8766' : '';
@@ -127,6 +127,14 @@ class ControlCenterClient {
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     if (!res.ok) throw new Error(`Snapshot request failed with status ${res.status}`);
+    return res.json();
+  }
+
+  public async fetchUsage(): Promise<UsageSummary> {
+    const res = await fetch(`${API_BASE}/api/usage`, {
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+    });
+    if (!res.ok) throw new Error(`Usage request failed with status ${res.status}`);
     return res.json();
   }
 

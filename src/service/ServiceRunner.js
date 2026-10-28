@@ -131,6 +131,18 @@ async function main() {
   }
 
   if (mode === '--stop') {
+    // Release any lingering zrok cloud shares
+    try {
+      const config = loadConfig();
+      const zrokManager = new ZrokManager({
+        binPath: config.zrok?.binPath,
+        target: config.zrok?.target || `http://127.0.0.1:${config.broker?.httpPort || 8766}`,
+        token: config.zrok?.token || process.env.ZROK_TOKEN,
+        enabled: true
+      });
+      zrokManager.cleanupStaleShares();
+    } catch (_) {}
+
     if (fs.existsSync(PID_PATH)) {
       const pid = parseInt(fs.readFileSync(PID_PATH, 'utf8').trim(), 10);
       if (isPidAlive(pid)) {
