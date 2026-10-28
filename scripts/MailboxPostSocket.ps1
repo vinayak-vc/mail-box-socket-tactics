@@ -5,7 +5,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\MailboxPostSocket.ps1 -As X -To Claude -BodyFile path\to\message.txt
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\MailboxPostSocket.ps1 -As A -To Claude -Body "TASK: ...`nSTATUS: ..."
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('C', 'X', 'A')][string]$As,
+    [Parameter(Mandatory = $true)][ValidateSet('C', 'X', 'A', 'H')][string]$As,
     [Parameter(Mandatory = $true)][string]$To,
     [string]$Body = '',
     [string]$BodyFile = '',
@@ -36,7 +36,7 @@ $Body = $Body.Trim()
 if (-not $Body) { Write-Output 'MailboxPostSocket: empty body, nothing posted'; exit 1 }
 if ($Body -match '(?m)^###\s*\[') { Write-Output 'MailboxPostSocket: the body must not contain a "### [id]" heading line: the script writes it'; exit 1 }
 
-$names = @{ C = 'Claude'; X = 'Codex'; A = 'Antigravity' }
+$names = @{ C = 'Claude'; X = 'Codex'; A = 'Antigravity'; H = 'Owner' }
 $mutex = New-Object System.Threading.Mutex($false, 'Global\OneBossFightMailbox')
 $got = $false
 

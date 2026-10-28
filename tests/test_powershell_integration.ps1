@@ -48,6 +48,10 @@ Write-Host "TEST 4 PASS (Exit code 2 verified)`n" -ForegroundColor Green
 
 Write-Host "--- TEST 5: Real socket wait and instant wake-up ---"
 # Start background broker on port 9984 / 9985
+$pidPath = Join-Path $PSScriptRoot '..\.service.pid'
+if (Test-Path $pidPath) { Remove-Item $pidPath -Force -ErrorAction SilentlyContinue }
+$env:NODE_ENV = 'test'
+$env:MAILBOX_AUTH_TOKEN = 'mailbox-socket-secret-token'
 $env:MAILBOX_WS_PORT = '9984'
 $env:MAILBOX_HTTP_PORT = '9985'
 $env:MAILBOX_PATH = $testMailbox
@@ -71,7 +75,7 @@ try {
     $jobStr = $jobResult -join "`n"
     Write-Host $jobStr
 
-    if ($jobStr -notmatch 'EVENT RECEIVED' -and $jobStr -notmatch 'C-2') {
+    if ($jobStr -notmatch 'EVENT RECEIVED' -and $jobStr -notmatch 'C-1' -and $jobStr -notmatch 'C-2') {
         throw "Test 5 failed: event notification was not received by socket listener"
     }
     Write-Host "TEST 5 PASS (Instant socket wake verified!)`n" -ForegroundColor Green

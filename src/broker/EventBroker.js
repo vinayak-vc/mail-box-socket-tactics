@@ -115,6 +115,7 @@ class EventBroker {
     }
 
     this.distPath = path.resolve(__dirname, '../../client/dist');
+    this.zrokManager = config.zrokManager || null;
   }
 
   /**
@@ -181,6 +182,13 @@ class EventBroker {
         resolve();
       });
       this.httpServer.on('error', reject);
+    });
+
+    // Support WebSocket upgrade directly on HTTP server (for remote tunneling via zrok)
+    this.httpServer.on('upgrade', (req, socket, head) => {
+      this.wss.handleUpgrade(req, socket, head, (ws) => {
+        this.wss.emit('connection', ws, req);
+      });
     });
 
     // 5. Start Heartbeat Timer
@@ -808,6 +816,17 @@ class EventBroker {
     const contentType = mimeTypes[ext] || 'application/octet-stream';
 
     try {
+      if (ext === '.html') {
+        let html = fs.readFileSync(filePath, 'utf8');
+        const injection = `<script>window.__MST_CONFIG__ = Object.assign(window.__MST_CONFIG__ || {}, { authToken: ${JSON.stringify(this.authToken)} });</script>`;
+        if (html.includes('<head>')) {
+          html = html.replace('<head>', `<head>${injection}`);
+        } else {
+          html = injection + html;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      }
       const content = fs.readFileSync(filePath);
       res.writeHead(200, { 'Content-Type': contentType });
       res.end(content);
@@ -861,6 +880,16 @@ class EventBroker {
       req.on('error', reject);
     });
 
+    // Public endpoint for UI bootstrap configuration (token, ports)
+    if (req.method === 'GET' && url.pathname === '/api/config') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        authToken: this.authToken,
+        wsPort: this.port,
+        httpPort: this.httpPort
+      }));
+    }
+
     // 1. Existing /health and /status endpoints
     if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/status')) {
       const connected = [];
@@ -879,6 +908,7 @@ class EventBroker {
         status: 'UP',
         timestamp: new Date().toISOString(),
         metrics: this.metrics,
+        zrok: this.zrokManager ? this.zrokManager.getStatus() : { enabled: false, status: 'DISABLED', publicUrl: null },
         activeTasks: Array.from(this.stateStore.tasks.values()).filter(t => t.status === PROCESSING_STATUS.CLAIMED || t.status === PROCESSING_STATUS.RUNNING),
         completedCount: Array.from(this.stateStore.tasks.values()).filter(t => t.status === PROCESSING_STATUS.COMPLETED).length,
         deadLetterCount: this.stateStore.deadLetters.size,
@@ -1007,6 +1037,7 @@ class EventBroker {
             metrics: this.metrics,
             lastError: this.lastError
           },
+          zrok: this.zrokManager ? this.zrokManager.getStatus() : { enabled: false, status: 'DISABLED', publicUrl: null },
           services: {
             brokerRunning: true,
             watcherRunning: !!this.watcher,
@@ -1377,6 +1408,10 @@ class EventBroker {
         resolve();
       }
     });
+
+    if (this.zrokManager) {
+      try { await this.zrokManager.stop(); } catch (_) {}
+    }
 
     this.stateStore.save();
     this.agentRegistry.save();

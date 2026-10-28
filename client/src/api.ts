@@ -5,9 +5,28 @@
 
 import { SystemSnapshot, Agent, Task, ActivityEvent } from './types';
 
-const API_BASE = window.location.port === '5173' ? 'http://127.0.0.1:8766' : '';
-const WS_URL = window.location.port === '5173' ? 'ws://127.0.0.1:8765' : `ws://${window.location.hostname}:8765`;
-const AUTH_TOKEN = 'mailbox-socket-secret-token';
+const isViteDev = window.location.port === '5173';
+const API_BASE = isViteDev ? 'http://127.0.0.1:8766' : '';
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const wsHost = isViteDev ? '127.0.0.1:8766' : (window.location.host || '127.0.0.1:8766');
+const WS_URL = `${wsProtocol}//${wsHost}`;
+
+export function getAuthToken(): string {
+  if (typeof window !== 'undefined') {
+    const injected = (window as any).__MST_CONFIG__?.authToken;
+    if (injected) return injected;
+    const stored = localStorage.getItem('mst_auth_token');
+    if (stored) return stored;
+  }
+  return 'mailbox-socket-secret-token';
+}
+
+export function setAuthToken(token: string): void {
+  if (typeof window !== 'undefined') {
+    (window as any).__MST_CONFIG__ = Object.assign((window as any).__MST_CONFIG__ || {}, { authToken: token });
+    localStorage.setItem('mst_auth_token', token);
+  }
+}
 
 export type EventCallback = (eventType: string, data: any) => void;
 
@@ -19,6 +38,22 @@ class ControlCenterClient {
   private onConnectionChange: ((connected: boolean) => void) | null = null;
 
   constructor() {
+    this.bootstrapAndConnect();
+  }
+
+  private async bootstrapAndConnect() {
+    // If running in dev or if injected config is missing, fetch authoritative config from broker
+    if (typeof window !== 'undefined' && !(window as any).__MST_CONFIG__?.authToken) {
+      try {
+        const res = await fetch(`${API_BASE}/api/config`);
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg.authToken) {
+            setAuthToken(cfg.authToken);
+          }
+        }
+      } catch (_) {}
+    }
     this.connectWs();
   }
 
@@ -39,11 +74,11 @@ class ControlCenterClient {
       this.ws = new WebSocket(WS_URL);
 
       this.ws.onopen = () => {
-        // Authenticate as Dashboard
+        // Authenticate as Dashboard using dynamic token
         const authPayload = JSON.stringify({
           type: 'AUTH_REQUEST',
           agentId: 'Dashboard',
-          token: AUTH_TOKEN
+          token: getAuthToken()
         });
         this.ws?.send(authPayload);
       };
@@ -89,7 +124,7 @@ class ControlCenterClient {
 
   public async fetchSnapshot(): Promise<SystemSnapshot> {
     const res = await fetch(`${API_BASE}/api/snapshot`, {
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     if (!res.ok) throw new Error(`Snapshot request failed with status ${res.status}`);
     return res.json();
@@ -100,7 +135,7 @@ class ControlCenterClient {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AUTH_TOKEN}`
+        'Authorization': `Bearer ${getAuthToken()}`
       },
       body: JSON.stringify(updates)
     });
@@ -115,7 +150,7 @@ class ControlCenterClient {
   public async testAgent(id: string): Promise<any> {
     const res = await fetch(`${API_BASE}/api/agents/${encodeURIComponent(id)}/test`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     return res.json();
   }
@@ -125,7 +160,7 @@ class ControlCenterClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AUTH_TOKEN}`
+        'Authorization': `Bearer ${getAuthToken()}`
       },
       body: JSON.stringify(agentConfig)
     });
@@ -138,7 +173,7 @@ class ControlCenterClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AUTH_TOKEN}`
+        'Authorization': `Bearer ${getAuthToken()}`
       },
       body: JSON.stringify(agentData)
     });
@@ -155,7 +190,7 @@ class ControlCenterClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AUTH_TOKEN}`
+        'Authorization': `Bearer ${getAuthToken()}`
       },
       body: JSON.stringify({ messageId: id })
     });
@@ -168,7 +203,7 @@ class ControlCenterClient {
   public async cancelTask(id: string): Promise<void> {
     const res = await fetch(`${API_BASE}/api/tasks/${encodeURIComponent(id)}/cancel`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Cancel failed' }));
@@ -181,7 +216,7 @@ class ControlCenterClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AUTH_TOKEN}`
+        'Authorization': `Bearer ${getAuthToken()}`
       },
       body: JSON.stringify({ as, to, body })
     });
@@ -198,7 +233,7 @@ class ControlCenterClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AUTH_TOKEN}`
+        'Authorization': `Bearer ${getAuthToken()}`
       },
       body: JSON.stringify({ action, target })
     });

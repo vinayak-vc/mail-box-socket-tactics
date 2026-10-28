@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Settings, Shield, Server, FileText, Download, Copy, Check, Eye, EyeOff } from 'lucide-react';
 import { SystemSnapshot } from '../types';
+import { getAuthToken } from '../api';
 
 interface SettingsViewProps {
   snapshot: SystemSnapshot | null;
@@ -81,7 +82,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ snapshot }) => {
             <div>
               <span style={{ color: 'var(--text-muted)' }}>Bearer Auth Token: </span>
               <span className="mono-cell" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                {showToken ? 'mailbox-socket-secret-token' : '••••••••••••••••••••••••'}
+                {showToken ? getAuthToken() : '••••••••••••••••••••••••'}
                 <button 
                   style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
                   onClick={() => setShowToken(!showToken)}
@@ -89,6 +90,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ snapshot }) => {
                   {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Public Internet Tunnel (zrok) */}
+        <div className="metric-card" style={{ gridColumn: 'span 2' }}>
+          <div className="metric-title">
+            <span>Public Internet Tunnel (zrok)</span>
+            <span className={`status-pill ${snapshot.zrok?.status === 'CONNECTED' ? 'status-online' : (snapshot.zrok?.status === 'STARTING' ? 'status-working' : 'status-stopped')} btn-sm`}>
+              {snapshot.zrok?.status || 'DISABLED'}
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginTop: '12px', fontSize: '13px' }}>
+            <div>
+              <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Public Internet URL:</div>
+              {snapshot.zrok?.publicUrl ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <a 
+                    href={snapshot.zrok.publicUrl} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    className="mono-cell" 
+                    style={{ color: 'var(--accent-primary)', textDecoration: 'underline' }}
+                  >
+                    {snapshot.zrok.publicUrl}
+                  </a>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      if (snapshot.zrok?.publicUrl) {
+                        navigator.clipboard.writeText(snapshot.zrok.publicUrl);
+                      }
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              ) : (
+                <span className="text-muted">Not active</span>
+              )}
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Access Mode:</div>
+              <strong>Local (127.0.0.1) & Public Internet Dual Access</strong>
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>zrok Authentication Token:</div>
+              <span className="mono-cell">{snapshot.zrok?.tokenMasked || (snapshot.zrok?.tokenConfigured ? 'Configured' : 'Not set')}</span>
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Target Proxy:</div>
+              <span className="mono-cell">{snapshot.zrok?.target || 'http://127.0.0.1:8766'}</span>
             </div>
           </div>
         </div>

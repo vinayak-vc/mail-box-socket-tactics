@@ -4,7 +4,7 @@
 # Uses explicit recipient matching: only wakes when a message is addressed to -Me.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\MailboxNextSocket.ps1 -Me <C|X|A> [-SeenCount N] [-Seconds 300] [-Mailbox path] [-WsPort 8765] [-AuthToken token]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('C', 'X', 'A')][string]$Me,
+    [Parameter(Mandatory = $true)][ValidateSet('C', 'X', 'A', 'H')][string]$Me,
     [int]$SeenCount = -1,
     [int]$Seconds = 300,
     [string]$Mailbox = '',
@@ -29,7 +29,7 @@ if (-not $Mailbox) {
     }
 }
 
-$agentName = switch ($Me) { 'C' { 'Claude' } 'X' { 'Codex' } 'A' { 'Antigravity' } }
+$agentName = switch ($Me) { 'C' { 'Claude' } 'X' { 'Codex' } 'A' { 'Antigravity' } 'H' { 'Owner' } }
 
 function Test-IsRecipientMatch([string]$partyCode, [string]$recipientText) {
     if (-not $recipientText) { return $false }
@@ -40,6 +40,7 @@ function Test-IsRecipientMatch([string]$partyCode, [string]$recipientText) {
         if ($partyCode -eq 'C' -and ($t -eq 'claude' -or $t -eq 'c' -or $t -like 'claude *' -or $t -like '*(tech lead)*')) { return $true }
         if ($partyCode -eq 'X' -and ($t -eq 'codex' -or $t -eq 'x' -or $t -like 'codex *' -or $t -like '*independent critic*')) { return $true }
         if ($partyCode -eq 'A' -and ($t -eq 'antigravity' -or $t -eq 'a' -or $t -eq 'ag' -or $t -like 'antigravity *' -or $t -like '*c++ implementer*')) { return $true }
+        if ($partyCode -eq 'H' -and ($t -eq 'owner' -or $t -eq 'h' -or $t -like 'owner *' -or $t -like '*human*')) { return $true }
     }
     return $false
 }

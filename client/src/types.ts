@@ -101,6 +101,16 @@ export interface SystemSnapshot {
     };
     lastError?: string | null;
   };
+  zrok?: {
+    enabled: boolean;
+    status: 'CONNECTED' | 'DISCONNECTED' | 'ERROR' | 'STARTING' | 'DISABLED';
+    publicUrl: string | null;
+    shareToken?: string | null;
+    target?: string;
+    tokenConfigured?: boolean;
+    tokenMasked?: string | null;
+    lastError?: string | null;
+  };
   services: {
     brokerRunning: boolean;
     watcherRunning: boolean;

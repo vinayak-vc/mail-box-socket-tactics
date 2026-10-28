@@ -45,6 +45,12 @@ switch ($Action) {
         } else {
             Write-Host "[ServiceControl] Service is not running." -ForegroundColor Yellow
         }
+        # Clean up any orphan zrok processes sharing port 8766
+        Get-CimInstance Win32_Process -Filter "Name LIKE '%zrok%'" -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.CommandLine -match '8766') {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     'start' {

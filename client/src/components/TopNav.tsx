@@ -5,7 +5,8 @@ import {
   RotateCw, 
   Radio, 
   Clock, 
-  AlertTriangle 
+  AlertTriangle,
+  Globe 
 } from 'lucide-react';
 import { SystemSnapshot } from '../types';
 import { client } from '../api';
@@ -69,6 +70,21 @@ export const TopNav: React.FC<TopNavProps> = ({ snapshot, wsConnected, onRefresh
             <Radio size={14} />
             <span>{wsConnected ? 'LIVE WS' : 'WS RECONNECTING'}</span>
           </div>
+
+          {/* Public zrok URL link */}
+          {snapshot?.zrok?.publicUrl && (
+            <a 
+              href={snapshot.zrok.publicUrl}
+              target="_blank" 
+              rel="noreferrer"
+              className="status-pill status-online"
+              style={{ textDecoration: 'none', cursor: 'pointer' }}
+              title={`Public Internet Access URL: ${snapshot.zrok.publicUrl}`}
+            >
+              <Globe size={13} />
+              <span>Public: {snapshot.zrok.shareToken || 'Live'}</span>
+            </a>
+          )}
 
           {/* Last Update */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>

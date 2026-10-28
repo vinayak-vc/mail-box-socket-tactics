@@ -15,6 +15,11 @@
     "fallbackPath": "C:\\UnrealProject\\MailBoxSocketTactics\\Documentation\\TEAM_MAILBOX.md",
     "mutexName": "Global\\OneBossFightMailbox"
   },
+  "zrok": {
+    "enabled": true,
+    "binPath": "C:\\scrcpy-win64-v2.4\\zrok2.exe",
+    "target": "http://127.0.0.1:8766"
+  },
   "agents": {
     "Claude": {
       "id": "Claude",

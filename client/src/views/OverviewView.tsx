@@ -193,6 +193,33 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ snapshot, onRefresh 
             </div>
             <div className="metric-sub">Atomic JSON (mailbox_state.json)</div>
           </div>
+
+          {/* Public Internet Access (zrok) */}
+          <div className="metric-card">
+            <div className="metric-title">
+              <span>Public Internet (zrok)</span>
+              <span className={`status-pill ${snapshot.zrok?.status === 'CONNECTED' ? 'status-online' : (snapshot.zrok?.status === 'STARTING' ? 'status-working' : 'status-stopped')} btn-sm`}>
+                {snapshot.zrok?.status || 'DISABLED'}
+              </span>
+            </div>
+            {snapshot.zrok?.publicUrl ? (
+              <div style={{ fontSize: '12px', marginTop: '6px' }}>
+                <a 
+                  href={snapshot.zrok.publicUrl} 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  style={{ color: 'var(--accent-primary)', textDecoration: 'underline', wordBreak: 'break-all' }}
+                >
+                  {snapshot.zrok.publicUrl}
+                </a>
+              </div>
+            ) : (
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                {snapshot.zrok?.enabled ? 'Establishing tunnel...' : 'Tunnel not active'}
+              </div>
+            )}
+            <div className="metric-sub">Local + Internet Dual Mode</div>
+          </div>
         </div>
       </div>
 

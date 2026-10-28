@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const EventBroker = require('../broker/EventBroker');
+const ZrokManager = require('./ZrokManager');
 const ClaudeAdapter = require('../adapters/ClaudeAdapter');
 const CodexAdapter = require('../adapters/CodexAdapter');
 const AntigravityAdapter = require('../adapters/AntigravityAdapter');
@@ -61,6 +62,16 @@ function loadConfig() {
   if (process.env.MAILBOX_WS_PORT) config.broker.port = parseInt(process.env.MAILBOX_WS_PORT, 10);
   if (process.env.MAILBOX_HTTP_PORT) config.broker.httpPort = parseInt(process.env.MAILBOX_HTTP_PORT, 10);
   if (process.env.MAILBOX_PATH) config.mailbox.path = process.env.MAILBOX_PATH;
+
+  if (process.env.ZROK_TOKEN) {
+    if (!config.zrok) config.zrok = {};
+    config.zrok.token = process.env.ZROK_TOKEN;
+    if (config.zrok.enabled === undefined) config.zrok.enabled = true;
+  }
+  if (process.env.ZROK_BIN) {
+    if (!config.zrok) config.zrok = {};
+    config.zrok.binPath = process.env.ZROK_BIN;
+  }
 
   // Validate authoritative mailbox path
   if (!fs.existsSync(config.mailbox.path)) {
@@ -153,12 +164,23 @@ async function main() {
   fs.writeFileSync(PID_PATH, String(process.pid), 'utf8');
 
   let broker = null;
+  let zrokManager = null;
   const adapters = [];
 
   const startBroker = mode === '--broker' || mode === '--all';
   const startAdapters = mode === '--adapters' || mode === '--all';
+  const enableZrok = args.includes('--zrok') || (config.zrok && config.zrok.enabled && process.env.NODE_ENV !== 'test');
 
   if (startBroker) {
+    if (enableZrok) {
+      zrokManager = new ZrokManager({
+        binPath: config.zrok.binPath,
+        target: config.zrok.target || `http://127.0.0.1:${config.broker.httpPort}`,
+        token: config.zrok.token,
+        enabled: true
+      });
+    }
+
     broker = new EventBroker({
       host: config.broker.host,
       port: config.broker.port,
@@ -169,10 +191,18 @@ async function main() {
       leaseTimeoutMs: config.broker.leaseTimeoutMs,
       maxRetries: config.broker.maxRetries,
       backoffInitialMs: config.broker.backoffInitialMs,
-      mailbox: config.mailbox
+      mailbox: config.mailbox,
+      zrokManager
     });
 
     await broker.start();
+
+    if (zrokManager) {
+      // Start zrok tunnel asynchronously so broker is available immediately
+      zrokManager.start().catch((err) => {
+        console.warn(`[ServiceRunner] zrok tunnel startup error: ${err.message}`);
+      });
+    }
   }
 
   if (startAdapters) {
@@ -216,6 +246,9 @@ async function main() {
 
   const shutdown = async () => {
     console.log('\n[ServiceRunner] Initiating shutdown...');
+    if (zrokManager) {
+      await zrokManager.stop();
+    }
     for (const adapter of adapters) {
       adapter.stop();
     }
