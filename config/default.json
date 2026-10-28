@@ -1,0 +1,51 @@
+{
+  "broker": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "httpPort": 8766,
+    "authToken": "mailbox-socket-secret-token",
+    "heartbeatIntervalMs": 15000,
+    "clientTimeoutMs": 35000,
+    "leaseTimeoutMs": 120000,
+    "maxRetries": 3,
+    "backoffInitialMs": 2000
+  },
+  "mailbox": {
+    "path": "C:\\UnrealProject\\OneBossFight\\Documentation\\TEAM_MAILBOX.md",
+    "fallbackPath": "C:\\UnrealProject\\MailBoxSocketTactics\\Documentation\\TEAM_MAILBOX.md",
+    "mutexName": "Global\\OneBossFightMailbox"
+  },
+  "agents": {
+    "Claude": {
+      "id": "Claude",
+      "partyCode": "C",
+      "aliases": ["Claude", "Claude (Tech Lead)", "Claude (Interim Lead)"],
+      "enabled": true,
+      "execMode": "cli",
+      "cliCommand": "claude",
+      "cliArgs": ["-c", "-p"],
+      "workingDir": "C:\\UnrealProject\\OneBossFight"
+    },
+    "Codex": {
+      "id": "Codex",
+      "partyCode": "X",
+      "aliases": ["Codex", "Codex (Tech Lead)", "Codex (Independent Critic)"],
+      "enabled": true,
+      "execMode": "cli",
+      "cliCommand": "C:\\Users\\Rushit Vaghela\\AppData\\Local\\OpenAI\\Codex\\bin\\2993767bd1dfb009\\codex.exe",
+      "cliArgs": ["exec", "resume", "--last"],
+      "workingDir": "C:\\UnrealProject\\OneBossFight"
+    },
+    "Antigravity": {
+      "id": "Antigravity",
+      "partyCode": "A",
+      "aliases": ["Antigravity", "Antigravity (C++ Implementer)", "AG"],
+      "enabled": true,
+      "execMode": "agentapi",
+      "cliCommand": "C:\\Users\\Rushit Vaghela\\.gemini\\antigravity\\bin\\agentapi.bat",
+      "cliArgs": ["send-message"],
+      "conversationId": "f3c213cd-dec6-440b-a5b5-afef6b3a13ca",
+      "workingDir": "C:\\UnrealProject\\OneBossFight"
+    }
+  }
+}

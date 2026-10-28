@@ -1,0 +1,6 @@
+node_modules/
+.locks/
+.service.pid
+data/
+tests/temp*/
+.env
