@@ -4,6 +4,9 @@
   "main": "index.js",
   "scripts": {
     "test": "node tests/test_suite.js",
+    "test:dashboard": "node tests/test_dashboard_suite.js",
+    "test:all": "node tests/test_suite.js && node tests/test_dashboard_suite.js",
+    "build:ui": "cd client && npm run build",
     "start": "node src/service/ServiceRunner.js --all",
     "broker": "node src/service/ServiceRunner.js --broker",
     "adapters": "node src/service/ServiceRunner.js --adapters",
@@ -13,7 +16,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "MailSocketTactics - Event-driven multi-AI coordination system and real-time Control Center",
   "dependencies": {
     "ws": "^8.22.0"
   }

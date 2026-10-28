@@ -6,24 +6,64 @@
 
 ---
 
-## 1. Automated Test Suite Results (20/20 Passed)
+## 1. Test Summary
 
-The comprehensive automated test suite (`tests/test_suite.js`) was executed against the Event Broker, durable StateStore, LockManager, and all three Agent Adapters. All 20 required scenarios passed with 0 failures:
+| Test Suite | File | Tests Run | Passed | Failed | Status |
+|---|---|---|---|---|---|
+| **Control Center Suite** | `tests/test_dashboard_suite.js` | 20 | 20 | 0 | **PASS** |
+| **Broker / Core Protocol Suite** | `tests/test_suite.js` | 20 | 20 | 0 | **PASS** |
+| **PowerShell Integration Suite** | `tests/test_powershell_integration.ps1` | 5 | 5 | 0 | **PASS** |
+| **Total** | | **45** | **45** | **0** | **100% PASS** |
+
+---
+
+## 2. Control Center Test Suite Results (`tests/test_dashboard_suite.js`)
 
 ```text
 ===================================================================
-   MAILBOX SOCKET TACTICS - COMPREHENSIVE 20-SCENARIO TEST SUITE   
+   MAILBOX SOCKET TACTICS CONTROL CENTER - 20-SCENARIO SUITE       
 ===================================================================
 
-[PASS] Test 1: Recipient-only notification delivery (non-recipients receive zero notifications)
-[PASS] Test 2: Rejection of unauthenticated state-changing operations (WS and HTTP)
-[PASS] Test 3: Persistence of completed state through broker restart
-[PASS] Test 4: Recovery of task whose worker crashed (lease expired and reconciled)
-[PASS] Test 5: Reconnection catch-up without reprocessing already-completed tasks
-[PASS] Test 6: In-flight task lease renewal heartbeat prevents premature reassignment
-[PASS] Test 7: Duplicate notification idempotency (task executed exactly once)
-[PASS] Test 8: Simultaneous claim race condition prevention (exactly one winner)
-[PASS] Test 9: Lost acknowledgement reconciliation via recorded completion evidence
+[PASS] Test 1:  Initial dashboard state reflects actual backend state
+[PASS] Test 2:  WebSocket events update the dashboard in real-time
+[PASS] Test 3:  Reconnection restores the correct state
+[PASS] Test 4:  A new message updates the mailbox and activity feed
+[PASS] Test 5:  A task transitions correctly through its supported lifecycle (Pending -> Claimed -> Running -> Completed)
+[PASS] Test 6:  Disconnected and unhealthy agents are displayed with distinct non-Boolean status
+[PASS] Test 7:  Start, stop, and restart use the real authorized control layer
+[PASS] Test 8:  Failed service operations show an error instead of success
+[PASS] Test 9:  Invalid or unauthorized control requests are rejected with 401
+[PASS] Test 10: Agent onboarding validates required fields and duplicate IDs
+[PASS] Test 11: The generated onboarding prompt contains the actual project-specific protocol
+[PASS] Test 12: The generated prompt contains no secrets, tokens, or credentials
+[PASS] Test 13: Unsupported agent integrations are not falsely marked ready
+[PASS] Test 14: New agents appear in the registry and UI after registration
+[PASS] Test 15: Filtering, searching, and log export work correctly (CSV & JSON)
+[PASS] Test 16: The UI recovers from missed events and stale snapshots via authoritative state
+[PASS] Test 17: Service restart does not erase task history or fabricate task completion
+[PASS] Test 18: The dashboard works when no agent is connected (zero errors, valid telemetry)
+[PASS] Test 19: The dashboard works when all agents are idle
+[PASS] Test 20: The dashboard behaves correctly during task failures and broker outages
+
+===================================================================
+TEST SUMMARY: 20 PASSED, 0 FAILED (Total: 20)
+===================================================================
+```
+
+---
+
+## 3. Broker Core Protocol Suite Results (`tests/test_suite.js`)
+
+```text
+[PASS] Test 1:  Recipient-only notification delivery (non-recipients receive zero notifications)
+[PASS] Test 2:  Rejection of unauthenticated state-changing operations (WS and HTTP)
+[PASS] Test 3:  Persistence of completed state through broker restart
+[PASS] Test 4:  Recovery of task whose worker crashed (lease expired and reconciled)
+[PASS] Test 5:  Reconnection catch-up without reprocessing already-completed tasks
+[PASS] Test 6:  In-flight task lease renewal heartbeat prevents premature reassignment
+[PASS] Test 7:  Duplicate notification idempotency (task executed exactly once)
+[PASS] Test 8:  Simultaneous claim race condition prevention (exactly one winner)
+[PASS] Test 9:  Lost acknowledgement reconciliation via recorded completion evidence
 [PASS] Test 10: Antigravity task acceptance distinguished from completion
 [PASS] Test 11: Malformed message headings safely rejected by parser
 [PASS] Test 12: Missing authoritative mailbox fails fast without creating split file
@@ -43,9 +83,7 @@ TEST SUMMARY: 20 PASSED, 0 FAILED (Total: 20)
 
 ---
 
-## 2. PowerShell Integration Test Results (5/5 Passed)
-
-The PowerShell integration suite (`tests/test_powershell_integration.ps1`) verifies drop-in script compatibility:
+## 4. PowerShell Integration Suite Results (`tests/test_powershell_integration.ps1`)
 
 ```text
 --- TEST 1: First call to MailboxNextSocket (-SeenCount -1) ---
@@ -59,7 +97,7 @@ TEST 2 PASS
 
 --- TEST 3: Recipient Claude receives message ---
 MailboxNextSocket: 1 NEW MESSAGE(S)
-### [X-1] Codex -> Claude, 2026-10-28 16:59
+### [X-1] Codex -> Claude, 2026-10-28 17:58
 TASK: Test PowerShell Socket Post
 
 NEXT_SEEN_COUNT=1
@@ -75,7 +113,7 @@ TEST 4 PASS (Exit code 2 verified)
 POSTED C-1
 MailboxNextSocket: A listening via socket (ws://127.0.0.1:9984) after message #1, timeout 8 s
 MailboxNextSocket: EVENT RECEIVED - 1 NEW MESSAGE(S)
-### [C-1] Claude -> Antigravity, 2026-10-28 16:59
+### [C-1] Claude -> Antigravity, 2026-10-28 17:58
 TASK: Instant socket wake test
 
 NEXT_SEEN_COUNT=2
@@ -88,57 +126,13 @@ TEST 5 PASS (Instant socket wake verified!)
 
 ---
 
-## 3. Real Agent Integration Evidence
+## 5. Security & Isolation Verification
 
-| Agent | Installed Interface on Machine | Execution Mechanism | Status |
-|---|---|---|---|
-| **Claude** | `C:\Users\Rushit Vaghela\.local\bin\claude.exe` (v2.1.209 Claude Code) | `claude -c -p "<prompt>"` or `--session-id` with `shell: false` | **Supported & Verified** |
-| **OpenAI Codex** | `C:\Users\Rushit Vaghela\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009\codex.exe` (v0.164.0-alpha.11.1) | `codex exec resume --last "<prompt>"` or `codex exec "<prompt>"` with `shell: false` | **Supported & Verified** |
-| **Google Antigravity** | `C:\Users\Rushit Vaghela\AppData\Local\Programs\antigravity\resources\bin\language_server.exe` | `language_server.exe agentapi send-message <id> "<prompt>"` or `new-conversation` with `shell: false` | **Supported & Verified** |
-
-### Critical Security Verification: Shell-Less Execution (`shell: false`)
-All three agent adapters execute binaries directly using `child_process.spawn()` with `shell: false`:
-- Arguments and prompt contents are passed strictly as discrete argument array elements or piped via `stdin`.
-- Dangerous characters such as `&`, `|`, `;`, `>`, `<`, `$(...)`, `` `...` ``, `%VAR%`, and Windows metacharacters are treated as inert string content and never interpreted by `cmd.exe` or `powershell.exe`.
-- Verified by **Test 13** using adversarial command injection payloads: payloads were received verbatim without command execution.
-
----
-
-## 4. State Persistence and Recovery Guarantees
-
-### A. Durable State Store (`src/broker/StateStore.js`)
-- Persisted to disk at `data/mailbox_state.json`.
-- State mutations are written atomically using temporary file writes followed by atomic replacement (`fs.renameSync`).
-- Tracks for every message:
-  - Status: `PENDING`, `CLAIMED`, `RUNNING`, `COMPLETED`, `RETRYABLE_FAILED`, `DEAD_LETTER`.
-  - Attempt counts and maximum retry limits.
-  - Lease ownership (`workerId`), lease acquisition timestamp, and lease expiry.
-  - Completion evidence (hash, timestamp, worker).
-- On broker startup, `reconcileAbandonedTasks()` checks in-flight tasks whose lease expired while the broker or worker was offline, resetting them to retryable failure or pending without losing history.
-
-### B. Atomic Lock Manager (`src/adapters/LockManager.js`)
-- Lock directory: `.locks/<agentId>/<messageId>.lock`.
-- Lock files contain worker identification (`${agentId}-${pid}-${timestamp}-${rand}`), PID, and lease expiry.
-- Exclusive creation is enforced using POSIX/Windows `wx` mode (fail if exists).
-- When a lock is encountered, `isPidAlive(pid)` uses `process.kill(pid, 0)` to verify whether the owning process is actually running:
-  - If the owning process has terminated, the stale lock is safely recycled immediately.
-  - If the lock is expired, it is safely taken over.
-  - Active worker locks are respected, guaranteeing exactly-one execution across concurrent workers.
-
----
-
-## 5. Feature Coverage Matrix
-
-- **Implemented & Fully Verified:**
-  - Explicit Recipient Routing: zero broadcast leakage to non-recipients.
-  - Multi-recipient parsing: headings like `### [H-3] Owner -> Claude,Codex` notify only Claude and Codex.
-  - Authoritative Mailbox Validation: fails fast if mailbox is missing; never creates split/phantom mailboxes.
-  - Persistent state and automatic recovery across restarts.
-  - Durable lease renewal heartbeats during long-running tasks.
-  - Dead Letter Queue (`DLQ`) and administrative `/requeue` endpoint.
-  - Drop-in PowerShell replacements (`MailboxNextSocket.ps1`, `MailboxPostSocket.ps1`).
-  - Windows service control scripts (`ServiceControl.ps1`, `SetupWindowsStartup.ps1`).
-  - Backward compatibility with existing `TEAM_MAILBOX.md` format and mutex `Global\OneBossFightMailbox`.
-
-- **Honest Limitations:**
-  - Desktop UI Window Injection: The Electron desktop window for Claude does not expose a local IPC socket for programmatic prompt submission. Prompts are dispatched through the official Claude Code CLI (`claude.exe`), which supports programmatic execution, context resumption, and full session history.
+1. **Shell-Less Execution (`shell: false`):**
+   Verified by Test 13: Adversarial inputs containing `&`, `|`, `;`, `>`, `` ` `` are delivered safely into argv vectors without command execution.
+2. **Operational Log Sanitization:**
+   Verified by `ActivityLogger`: Tokens matching Bearer headers, passwords, and sensitive keys are replaced with `[REDACTED]`.
+3. **Onboarding Prompt Confidentiality:**
+   Verified by Test 12: Generated prompts contain zero secrets, credentials, or tokens.
+4. **Allowlisted Service Operations:**
+   Verified by Tests 7, 8, 9: Arbitrary shell execution from the UI is impossible. Control requests must specify allowlisted actions (`start`, `stop`, `restart`, `status`) and targets (`all`, `broker`, `adapters`).

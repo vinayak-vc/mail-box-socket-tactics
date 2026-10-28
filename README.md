@@ -1,52 +1,75 @@
-# MailBox Socket Tactics: Event-Driven Multi-AI Coordination Framework
+# MailBox Socket Tactics: Event-Driven Multi-AI Coordination Framework & Control Center
 
-A real-time, event-driven socket notification architecture enabling **Claude (Tech Lead)**, **OpenAI Codex (Technical Lead / Independent Critic)**, and **Google Antigravity (Senior C++ Implementer)** to coordinate asynchronously without wasteful periodic polling loops.
+A real-time, event-driven socket notification architecture and rich desktop Control Center enabling **Claude (Tech Lead)**, **OpenAI Codex (Technical Lead / Independent Critic)**, and **Google Antigravity (Senior C++ Implementer)** to coordinate asynchronously without wasteful periodic polling loops.
 
 ---
 
-## 1. Quickstart
+## 1. Quickstart & Control Center
 
-### Step 1: Start the Event Broker & Adapters
-Run via PowerShell:
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\ServiceControl.ps1 -Action start -Mode all
-```
-Or double-click:
-- `scripts\StartEventBroker.bat`
-- `scripts\StartAdapters.bat`
+### One-Click Launch (Complete System + Dashboard)
+Double click:
+- `scripts\StartDashboard.bat`
 
-### Step 2: Inspect Status & Metrics
+Or run via terminal:
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\ServiceControl.ps1 -Action status
+npm start
 ```
-Or query the HTTP API endpoint directly in your browser or curl:
+Then open your browser at:
 ```text
-http://127.0.0.1:8766/status
+http://127.0.0.1:8766/
 ```
 
-### Step 3: Run Automated Tests
+### Development Mode (Vite Live Reload)
 ```cmd
-npm test
+cd client
+npm run dev
 ```
-Or:
-```cmd
-node tests\test_suite.js
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\test_powershell_integration.ps1
-```
-All **20/20 test suite scenarios** and **5/5 PowerShell integration tests** run and pass deterministically.
+Accessible at `http://127.0.0.1:5173/` (proxies `/api` and `/ws` to the local backend).
 
 ---
 
-## 2. Directory Layout
+## 2. Dashboard Features & Layout
+
+The **MailSocketTactics Control Center** is a desktop-focused web application built with **React**, **TypeScript**, and **Vite**, connecting in real-time to the Event Broker via WebSocket and REST APIs:
+
+1. **Overview Dashboard:** Live summary cards (broker status, active/executing/idle agents, task queues, DLQ), service stack health, and real-time operational activity feed.
+2. **AI Agents:** Real-time agent status cards (`Connected`, `Idle`, `Working`, `Waiting`, `Degraded`, `Offline`, `Disabled`, `Paused`), active task execution tracking, task counters, pause/resume assignment toggles (without killing running work), and capability checks.
+3. **Task Queue:** Comprehensive task grid with status filters, detailed drawer inspection with **9-Step Lifecycle Stepper**, retry/requeue actions, and cancel controls.
+4. **Mailbox:** Direct live viewer of the authoritative `TEAM_MAILBOX.md` file, sender/recipient filtering, thread context, and atomic message composer protected under the named mutex `Global\OneBossFightMailbox`.
+5. **Message Logs:** Chronological operational dispatch log with automatic secret/token redaction, filters by level/type, and one-click JSON/CSV export.
+6. **Activity Timeline:** High-density event stream of connections, claims, leases, and transitions.
+7. **Add AI Agent Wizard:** 5-step guided wizard to onboard future AI coding agents:
+   - Step 1: Agent Details & ID validation.
+   - Step 2: Capability check & real environment detection.
+   - Step 3: Team onboarding prompt generation (project-accurate, zero secrets, copy/download).
+   - Step 4: Persistent registration to `data/agent_registry.json`.
+   - Step 5: Onboarding status lifecycle tracking.
+8. **System Settings:** Network ports, auth token masking, mutex configuration, and system snapshot export.
+
+---
+
+## 3. Directory Layout
 
 ```text
 MailBoxSocketTactics/
 ├── config/
 │   ├── default.json                  # Broker, mailbox, and agent configuration
 │   └── .env.example                  # Environment variable secrets template
+├── client/                           # React + TypeScript + Vite Dashboard
+│   ├── src/
+│   │   ├── components/               # Sidebar, TopNav
+│   │   ├── views/                    # Overview, Agents, Tasks, Mailbox, Logs, AddAgent, Settings
+│   │   ├── api.ts                    # Real-time WebSocket & REST client
+│   │   └── types.ts                  # Shared data schemas
+│   ├── dist/                         # Pre-built static UI assets (served on :8766)
+│   └── vite.config.ts
 ├── src/
 │   ├── broker/
-│   │   ├── EventBroker.js            # WebSocket & HTTP Event Broker daemon
+│   │   ├── EventBroker.js            # WebSocket & HTTP Event Broker daemon with API routes
+│   │   ├── AgentRegistry.js          # Persistent data/agent_registry.json manager
+│   │   ├── ActivityLogger.js         # Secret-sanitized operational logger (JSONL/CSV)
+│   │   ├── ServiceController.js      # Allowlisted service management (start/stop/restart)
+│   │   ├── PromptGenerator.js        # Project-accurate team onboarding prompt generator
 │   │   └── MailboxWatcher.js         # Durable TEAM_MAILBOX.md watcher with lock retries
 │   ├── protocol/
 │   │   └── MessageProtocol.js        # Heading parser, recipient matching, event types
@@ -62,21 +85,39 @@ MailBoxSocketTactics/
 │   ├── MailboxPostSocket.ps1         # Atomic append & sub-15ms event publisher
 │   ├── ServiceControl.ps1            # Start, stop, restart, inspect status
 │   ├── SetupWindowsStartup.ps1       # Configure auto-start at Windows boot / logon
+│   ├── StartDashboard.bat            # 1-click launcher for Control Center
 │   ├── StartEventBroker.bat          # 1-click batch launcher for Event Broker
 │   └── StartAdapters.bat             # 1-click batch launcher for Agent Adapters
 ├── tests/
-│   ├── test_suite.js                 # 20/20 automated scenario verification suite
-│   └── test_powershell_integration.ps1 # End-to-end PowerShell script tests (5/5 passing)
+│   ├── test_suite.js                 # 20/20 automated broker/adapter verification suite
+│   ├── test_dashboard_suite.js       # 20/20 automated Control Center verification suite
+│   └── test_powershell_integration.ps1 # 5/5 end-to-end PowerShell script tests
 └── Documentation/
     ├── ARCHITECTURE.md               # System architecture and data flow diagrams
+    ├── API_REFERENCE.md              # REST & WebSocket API specification
     ├── MESSAGE_PROTOCOL.md           # Event specifications, lease lifecycles, DLQ
     ├── MIGRATION_GUIDE.md            # Step-by-step migration from 300s polling
-    └── VERIFICATION_REPORT.md        # Comprehensive test execution evidence
+    └── VERIFICATION_REPORT.md        # Comprehensive test execution evidence (45/45 tests passing)
 ```
 
 ---
 
-## 3. Windows Service Commands
+## 4. Verification & Testing
+
+Run all automated test suites:
+```cmd
+npm run test:all
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\test_powershell_integration.ps1
+```
+
+- **Broker / Adapter Suite (`tests/test_suite.js`):** 20/20 Passed
+- **Control Center Suite (`tests/test_dashboard_suite.js`):** 20/20 Passed
+- **PowerShell Integration Suite (`tests/test_powershell_integration.ps1`):** 5/5 Passed
+- **Total:** **45 / 45 deterministic tests passing.**
+
+---
+
+## 5. Windows Service Commands
 
 | Action | PowerShell Command |
 |---|---|
