@@ -43,41 +43,46 @@ const HEADING_REGEX = /^[ \t]*###[ \t]+\[(?<party>[A-Z]+)-(?<number>\d+)\][ \t]+
  */
 function isRecipientMatch(agentId, recipientString) {
   if (!recipientString || !agentId) return false;
-  const target = String(recipientString).trim().toLowerCase();
-  const id = String(agentId).trim().toLowerCase();
 
-  // Split target by delimiters: comma, slash, ampersand, or word "and"
-  const rawTokens = target.split(/[,/&]|\band\b/).map(t => t.trim()).filter(Boolean);
+  const check = (idStr, targetStr) => {
+    const target = String(targetStr).trim().toLowerCase();
+    const id = String(idStr).trim().toLowerCase();
 
-  for (const token of rawTokens) {
-    if (token === 'all' || token === 'everyone' || token === 'team') {
-      return true;
+    // Split target by delimiters: comma, slash, ampersand, or word "and"
+    const rawTokens = target.split(/[,/&]|\band\b/).map(t => t.trim()).filter(Boolean);
+
+    for (const token of rawTokens) {
+      if (token === 'all' || token === 'everyone' || token === 'team') {
+        return true;
+      }
+
+      if (id === 'claude' || id === 'c') {
+        if (token === 'claude' || token === 'c' || token.startsWith('claude ') || token.includes('(tech lead)')) {
+          return true;
+        }
+      } else if (id === 'codex' || id === 'x') {
+        if (token === 'codex' || token === 'x' || token.startsWith('codex ') || token.includes('independent critic')) {
+          return true;
+        }
+      } else if (id === 'antigravity' || id === 'a' || id === 'ag') {
+        if (token === 'antigravity' || token === 'a' || token === 'ag' || token.startsWith('antigravity ') || token.includes('c++ implementer')) {
+          return true;
+        }
+      } else if (id === 'owner' || id === 'h' || id === 'human') {
+        if (token === 'owner' || token === 'h' || token === 'human') {
+          return true;
+        }
+      } else {
+        if (token === id) {
+          return true;
+        }
+      }
     }
+    return false;
+  };
 
-    if (id === 'claude' || id === 'c') {
-      if (token === 'claude' || token === 'c' || token.startsWith('claude ') || token.includes('(tech lead)')) {
-        return true;
-      }
-    } else if (id === 'codex' || id === 'x') {
-      if (token === 'codex' || token === 'x' || token.startsWith('codex ') || token.includes('independent critic')) {
-        return true;
-      }
-    } else if (id === 'antigravity' || id === 'a' || id === 'ag') {
-      if (token === 'antigravity' || token === 'a' || token === 'ag' || token.startsWith('antigravity ') || token.includes('c++ implementer')) {
-        return true;
-      }
-    } else if (id === 'owner' || id === 'h' || id === 'human') {
-      if (token === 'owner' || token === 'h' || token === 'human') {
-        return true;
-      }
-    } else {
-      if (token === id) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  // Support both (agentId, recipientString) and legacy (recipientString, agentId)
+  return check(agentId, recipientString) || check(recipientString, agentId);
 }
 
 /**

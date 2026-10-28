@@ -61,8 +61,8 @@ class MailboxDomainService {
     const normId = normalizeAgentId(agentId);
 
     return messages.filter(msg => {
-      // Must match recipient
-      if (!isRecipientMatch(msg.recipientRaw, normId)) {
+      // Must match recipient (agentId first, recipientRaw second)
+      if (!isRecipientMatch(normId, msg.recipientRaw)) {
         return false;
       }
 
@@ -89,7 +89,7 @@ class MailboxDomainService {
     if (agentId) {
       const norm = normalizeAgentId(agentId);
       filtered = filtered.filter(m => 
-        isRecipientMatch(m.recipientRaw, norm) || normalizeAgentId(m.sender) === norm
+        isRecipientMatch(norm, m.recipientRaw) || normalizeAgentId(m.sender) === norm
       );
     }
 

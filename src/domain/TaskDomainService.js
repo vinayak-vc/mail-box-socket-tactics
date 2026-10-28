@@ -63,7 +63,7 @@ class TaskDomainService {
 
     // Verify recipient authorization
     const normAgent = normalizeAgentId(agentId);
-    if (!isRecipientMatch(task.recipient, normAgent)) {
+    if (!isRecipientMatch(normAgent, task.recipient)) {
       throw new Error(`Unauthorized: Agent ${agentId} is not a designated recipient for task ${messageId} (${task.recipient})`);
     }
 
