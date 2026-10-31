@@ -70,7 +70,7 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
 
       {/* Aggregate Stats */}
       <div className="grid-cards" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginBottom: '20px' }}>
-        <div className="metric-card" style={{ minHeight: '110px', justifyContent: 'space-between' }}>
+        <div className="metric-card" style={{ height: '115px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div className="metric-title">
             <span>Total Tasks Executed</span>
             <Cpu size={16} color="var(--accent-primary)" />
@@ -79,7 +79,7 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
           <div className="metric-sub">Across all connected AI workers</div>
         </div>
 
-        <div className="metric-card" style={{ minHeight: '110px', justifyContent: 'space-between' }}>
+        <div className="metric-card" style={{ height: '115px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div className="metric-title">
             <span>Total Compute Time</span>
             <Clock size={16} color="var(--color-success)" />
@@ -88,7 +88,7 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
           <div className="metric-sub">Execution duration recorded by broker</div>
         </div>
 
-        <div className="metric-card" style={{ minHeight: '110px', justifyContent: 'space-between' }}>
+        <div className="metric-card" style={{ height: '115px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div className="metric-title">
             <span>Estimated Token Volume</span>
             <Zap size={16} color="var(--color-warning)" />
@@ -97,13 +97,15 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
           <div className="metric-sub">Estimated task payload tokens</div>
         </div>
 
-        <div className="metric-card" style={{ minHeight: '110px', justifyContent: 'space-between' }}>
+        <div className="metric-card" style={{ height: '115px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div className="metric-title">
             <span>Data Transparency</span>
             <ShieldAlert size={16} color="var(--accent-primary)" />
           </div>
-          <div className="metric-value" style={{ fontSize: '15px', color: 'var(--color-success)', display: 'flex', alignItems: 'center' }}>
-            Zero-Scrape Authoritative
+          <div style={{ display: 'flex', alignItems: 'center', height: '36px' }}>
+            <span className="status-pill status-online" style={{ fontSize: '12px', fontWeight: 700, padding: '4px 10px' }}>
+              Zero-Scrape Authoritative
+            </span>
           </div>
           <div className="metric-sub">Separates subscription quotas from token counts</div>
         </div>
@@ -148,7 +150,7 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
               </div>
             </div>
 
-            {/* Sub-cards Grid: 3 equal height columns */}
+            {/* Sub-cards Grid: 3 equal height columns with aligned key-value metrics */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', alignItems: 'stretch' }}>
               {/* 5-Hour Subscription Quota */}
               <div style={{ 
@@ -159,24 +161,35 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                minHeight: '145px'
+                minHeight: '170px'
               }}>
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>5-Hour Subscription Quota</span>
                     <span className={getBadgeClass(agentQuota.fiveHourQuota.state)} style={{ fontSize: '11px', padding: '2px 8px' }}>
                       {agentQuota.fiveHourQuota.state}
                     </span>
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: '4px' }}>
-                    {agentQuota.fiveHourQuota.note}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Window Type:</span>
+                      <strong style={{ color: 'var(--text-secondary)' }}>Rolling 5-Hour Interval</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Telemetry Channel:</span>
+                      <strong style={{ color: 'var(--text-secondary)' }}>Protected (Zero-Scrape)</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Quota Status:</span>
+                      <strong style={{ color: agentQuota.fiveHourQuota.state === 'Available' ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                        {agentQuota.fiveHourQuota.value || 'Server-Side Dynamic'}
+                      </strong>
+                    </div>
                   </div>
                 </div>
-                {agentQuota.fiveHourQuota.value && (
-                  <div style={{ marginTop: '12px', fontSize: '13px', fontWeight: 600, color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
-                    {agentQuota.fiveHourQuota.value}
-                  </div>
-                )}
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4, marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px' }}>
+                  {agentQuota.fiveHourQuota.note}
+                </div>
               </div>
 
               {/* Weekly Subscription Quota */}
@@ -188,24 +201,35 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                minHeight: '145px'
+                minHeight: '170px'
               }}>
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Weekly Subscription Quota</span>
                     <span className={getBadgeClass(agentQuota.weeklyQuota.state)} style={{ fontSize: '11px', padding: '2px 8px' }}>
                       {agentQuota.weeklyQuota.state}
                     </span>
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: '4px' }}>
-                    {agentQuota.weeklyQuota.note}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Window Type:</span>
+                      <strong style={{ color: 'var(--text-secondary)' }}>Weekly Dynamic Tier</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Provider Cloud:</span>
+                      <strong style={{ color: 'var(--text-secondary)' }}>Dynamic Rate-Limit</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Quota Status:</span>
+                      <strong style={{ color: agentQuota.weeklyQuota.state === 'Available' ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                        {agentQuota.weeklyQuota.value || 'Server-Side Dynamic'}
+                      </strong>
+                    </div>
                   </div>
                 </div>
-                {agentQuota.weeklyQuota.value && (
-                  <div style={{ marginTop: '12px', fontSize: '13px', fontWeight: 600, color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
-                    {agentQuota.weeklyQuota.value}
-                  </div>
-                )}
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4, marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px' }}>
+                  {agentQuota.weeklyQuota.note}
+                </div>
               </div>
 
               {/* Task Execution Metrics */}
@@ -217,21 +241,21 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                minHeight: '145px'
+                minHeight: '170px'
               }}>
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Task Execution Metrics</span>
                     <span className={getBadgeClass(agentQuota.taskMetrics.state)} style={{ fontSize: '11px', padding: '2px 8px' }}>
                       {agentQuota.taskMetrics.state}
                     </span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px', marginTop: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '5px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
                       <span style={{ color: 'var(--text-muted)' }}>Tasks Processed:</span>
                       <strong style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{agentQuota.taskMetrics.tasksExecuted}</strong>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '5px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '6px' }}>
                       <span style={{ color: 'var(--text-muted)' }}>Compute Duration:</span>
                       <strong style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{formatDuration(agentQuota.taskMetrics.totalComputeMs)}</strong>
                     </div>
@@ -242,6 +266,9 @@ export const AiUsageView: React.FC<AiUsageViewProps> = ({ snapshot, onRefresh })
                       </strong>
                     </div>
                   </div>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4, marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px' }}>
+                  Authoritative task execution recorded by EventBroker.
                 </div>
               </div>
             </div>

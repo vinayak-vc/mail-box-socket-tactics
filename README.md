@@ -154,3 +154,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\test_powershell_integr
 | **Inspect Status** | `powershell -File scripts\ServiceControl.ps1 -Action status` |
 | **Enable Windows Auto-Start** | `powershell -File scripts\SetupWindowsStartup.ps1` |
 | **Disable Windows Auto-Start** | `powershell -File scripts\SetupWindowsStartup.ps1 -RemoveTask` |
+
+---
+
+## 7. Security & Hardening Notes (2026-10-30)
+
+- **Auth token:** set `MAILBOX_AUTH_TOKEN` in `config/.env` (random value). `ServiceRunner` refuses to start without it or with the old default; `config/default.json` no longer carries a token. The PowerShell scripts read it from `-AuthToken`, `$env:MAILBOX_AUTH_TOKEN`, or `config/.env`.
+- **Tunnel exposure:** `/api/config` and the served HTML only include the token for a browser on this machine (loopback `Host`, no forwarding headers). Remote/zrok viewers are prompted for the token and it is kept in their `localStorage`.
+- **No history replay:** each adapter persists handled message IDs to `data/adapter_state_<Agent>.json`. On the first run the existing mailbox is baselined as handled, so restarts never re-run old messages through the headless CLI.
+- **Broadcast gating:** messages addressed to several agents (or ALL) are not auto-dispatched to headless CLIs unless `"dispatchBroadcast": true` is set for that agent in `config/default.json`. `Claude,Owner` counts as a direct message.
+- Tests: `npm run test:hardening` (9 checks).
+
+---
+
+## 8. Monitor-only mode (2026-10-30)
+
+The dashboard is now a read-only project monitor. Agents run their own mailbox watchers; the service no longer launches headless CLIs.
+
+- **Start:** `npm start` / `scripts\StartDashboard.bat` now run the broker only (`--broker`). Use `--all` yourself if you ever want the adapters back.
+- **Progress page:** `GET /api/progress` parses `TASKS.md` (progress table, remaining work, every gate task table), `KNOWN_ISSUES.md`, the "Current state" bullets of `PROJECT_STATE.md`, doc freshness, and the latest AI messages from `TEAM_MAILBOX.md`. It never writes to the docs. Task status is bucketed from the first word of the Status column (Done/Verified, Built/Partial, Doing, Blocked, Todo, Other).
+- **Agents show as connected** while their `MailboxNextSocket.ps1` watcher is waiting on the broker.
+- **Navigation:** Progress, Mailbox, AI Agents, Activity, Settings. Start/Stop/Restart buttons were removed from the top bar.
+- **Phones:** under 768 px the sidebar becomes a bottom tab bar and layouts collapse to one column. Remote viewers (zrok) enter the token once; all `/api/*`, `/health` and `/status` reads need it unless the browser is on this PC.

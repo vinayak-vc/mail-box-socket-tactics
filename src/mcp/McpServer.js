@@ -248,6 +248,24 @@ class McpServer {
           type: 'object',
           properties: {}
         }
+      },
+      {
+        name: 'send_owner_email',
+        description: 'Sends an email notification directly to the Human Owner via Brevo transactional email. Use for urgent blockers, decisions needed, critical milestones, or escalations.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            subject: { type: 'string', description: 'Concise email subject (e.g. [DECISION NEEDED] Boss Phase 2 Transition Logic)' },
+            message: { type: 'string', description: 'Detailed explanation, decision options, or status report for the owner' },
+            urgency: {
+              type: 'string',
+              enum: ['DECISION_NEEDED', 'URGENT_BLOCKER', 'MILESTONE_REACHED', 'REVIEW_REQUESTED', 'GENERAL_UPDATE'],
+              description: 'Urgency level or category of the notification (default: DECISION_NEEDED)'
+            },
+            taskReference: { type: 'string', description: 'Optional message ID or task reference (e.g. X-280, C-249)' }
+          },
+          required: ['subject', 'message']
+        }
       }
     ];
   }
@@ -279,7 +297,8 @@ class McpServer {
             status: a.status,
             role: a.role
           })),
-          taskCounts: { pending, running, completed, total: allTasks.length }
+          taskCounts: { pending, running, completed, total: allTasks.length },
+          emailNotifications: this.services.emailService ? this.services.emailService.getStatus() : { enabled: false }
         };
       }
 
@@ -424,6 +443,30 @@ class McpServer {
           agentId: callerId,
           timestamp: new Date().toISOString()
         };
+      }
+
+      case 'send_owner_email': {
+        if (!args.subject || !args.message) {
+          throw new Error("Arguments 'subject' and 'message' are required");
+        }
+        const senderName = `${this.canonicalAgent.displayName || callerId} (${this.canonicalAgent.role || 'AI Team Member'})`;
+        const res = await this.services.emailService.sendOwnerEmail({
+          senderAgent: senderName,
+          subject: args.subject,
+          message: args.message,
+          urgency: args.urgency || 'DECISION_NEEDED',
+          taskReference: args.taskReference || null
+        });
+
+        if (this.logger) {
+          this.logger.log({
+            level: res.status === 'error' ? 'ERROR' : 'INFO',
+            type: 'OWNER_EMAIL_DISPATCHED',
+            agentId: callerId,
+            summary: `Owner email dispatch by ${callerId}: ${args.subject} (${res.status})`
+          });
+        }
+        return res;
       }
 
       default:

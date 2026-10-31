@@ -144,6 +144,20 @@ class MailboxDomainService {
         args.push('-Mailbox', this.mailboxPath);
       }
 
+      // Pass auth token to post script if configured
+      const envFile = path.resolve(__dirname, '../../config/.env');
+      let tok = process.env.MAILBOX_AUTH_TOKEN;
+      if (!tok && fs.existsSync(envFile)) {
+        try {
+          const envContent = fs.readFileSync(envFile, 'utf8');
+          const m = envContent.match(/^\s*MAILBOX_AUTH_TOKEN\s*=\s*(.+)$/m);
+          if (m) tok = m[1].trim();
+        } catch (e) {}
+      }
+      if (tok) {
+        args.push('-AuthToken', tok);
+      }
+
       const ps = spawn('powershell.exe', args, { shell: false });
       let stdout = '';
       let stderr = '';

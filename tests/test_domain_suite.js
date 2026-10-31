@@ -7,10 +7,12 @@ const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
 const {
+  createDomainServices,
   MailboxDomainService,
   TaskDomainService,
   AgentDomainService,
-  UsageDomainService
+  UsageDomainService,
+  EmailDomainService
 } = require('../src/domain');
 const StateStore = require('../src/broker/StateStore');
 const AgentRegistry = require('../src/broker/AgentRegistry');
@@ -265,6 +267,19 @@ TASK: Unreal physics substepping verification
     report('Test 12: UsageDomainService records task compute and reports quota transparency', true);
   } catch (e) {
     report('Test 12: UsageDomainService records task compute and reports quota transparency', false, e);
+  }
+
+  // Test 13: EmailDomainService initialization and status reporting
+  try {
+    const services = createDomainServices({ mailboxPath: TEST_MAILBOX });
+    assert.ok(services.emailService, 'services.emailService must be initialized');
+    const emailStatus = services.emailService.getStatus();
+    assert.ok(typeof emailStatus.enabled === 'boolean');
+    assert.ok(typeof emailStatus.hasApiKey === 'boolean');
+    assert.ok(typeof emailStatus.ownerEmailMasked === 'string');
+    report('Test 13: EmailDomainService integrates cleanly into central container', true);
+  } catch (e) {
+    report('Test 13: EmailDomainService integrates cleanly into central container', false, e);
   }
 
   // Clean test files

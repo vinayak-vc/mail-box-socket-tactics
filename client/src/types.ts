@@ -171,3 +171,34 @@ export interface UsageSummary {
     totalEstimatedTokens: number;
   };
 }
+
+export type TaskBucket = 'done' | 'built' | 'doing' | 'blocked' | 'todo' | 'other';
+
+export interface ProgressTask {
+  id: string;
+  title: string;
+  owner: string;
+  status: TaskBucket;
+  statusText: string;
+}
+
+export interface ProgressData {
+  generatedAt: string;
+  docsAvailable: boolean;
+  docsFolder: string | null;
+  tasksUpdated: string | null;
+  whole: { area: string; rows: string; done: string; percent: number | null; percentText: string; state: string } | null;
+  areas: Array<{ area: string; rows: string; done: string; percent: number | null; percentText: string; state: string }>;
+  remaining: string[];
+  sections: Array<{ name: string; tasks: ProgressTask[]; counts: Record<TaskBucket, number> }>;
+  counts: Record<TaskBucket, number>;
+  totalTasks: number;
+  knownIssues: { open: number; closed: number; total: number; recentOpen: Array<{ id: string; area: string; text: string; status: string }> };
+  state: { heading: string | null; bullets: string[] };
+  conversation: {
+    total: number;
+    lastBySender: Record<string, { id: string; timestamp: string }>;
+    recent: Array<{ id: string; sender: string; recipient: string; timestamp: string; task: string; status: string; nextAction: string }>;
+  };
+  docs: Array<{ name: string; mtime: string | null; sizeKb: number | null; exists: boolean }>;
+}

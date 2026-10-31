@@ -142,6 +142,11 @@ class ServiceController {
 
     if (action === 'stop') {
       if (!currentPid) {
+        // Even if Node is stopped, ensure lingering zrok shares/processes are released
+        try {
+          execFile('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-File', this.serviceControlScript, '-Action', 'stop'], { timeout: 8000 }, () => {});
+        } catch (_) {}
+
         return {
           action: 'stop',
           success: true,
@@ -165,6 +170,11 @@ class ServiceController {
       if (fs.existsSync(this.pidPath)) {
         try { fs.unlinkSync(this.pidPath); } catch (_) {}
       }
+
+      // Release any lingering zrok cloud shares
+      try {
+        execFile('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-File', this.serviceControlScript, '-Action', 'stop'], { timeout: 8000 }, () => {});
+      } catch (_) {}
 
       return {
         action: 'stop',

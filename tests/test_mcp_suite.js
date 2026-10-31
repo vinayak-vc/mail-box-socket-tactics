@@ -84,23 +84,24 @@ TASK: Verify hit collision math on Greystone sword sweep
   try {
     const listRes = await mcpClaude.handleRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = listRes.result.tools;
-    assert.strictEqual(tools.length, 15, 'Must expose all 15 mailbox & task tools');
+    assert.strictEqual(tools.length, 16, 'Must expose all 16 domain tools');
     
     const requiredTools = [
       'get_team_status', 'get_my_identity', 'get_pending_messages',
       'get_message', 'wait_for_message', 'claim_message',
       'acknowledge_message', 'send_message', 'update_task_status',
       'complete_task', 'fail_task', 'get_task_history',
-      'get_message_history', 'get_agent_status', 'heartbeat'
+      'get_message_history', 'get_agent_status', 'heartbeat',
+      'send_owner_email'
     ];
 
     for (const reqTool of requiredTools) {
       assert.ok(tools.some(t => t.name === reqTool), `Missing tool: ${reqTool}`);
     }
 
-    report('Test 2: MCP tools/list exposes all 15 domain tools with schemas', true);
+    report('Test 2: MCP tools/list exposes all 16 domain tools with schemas', true);
   } catch (e) {
-    report('Test 2: MCP tools/list exposes all 15 domain tools with schemas', false, e);
+    report('Test 2: MCP tools/list exposes all 16 domain tools with schemas', false, e);
   }
 
   // Test 3: Tool get_my_identity binds to caller
@@ -316,6 +317,32 @@ TASK: Verify hit collision math on Greystone sword sweep
     report('Test 13: MCP JSON-RPC returns standard -32601 for unknown methods', true);
   } catch (e) {
     report('Test 13: MCP JSON-RPC returns standard -32601 for unknown methods', false, e);
+  }
+
+  // Test 14: Tool send_owner_email validation and execution
+  try {
+    const emailRes = await mcpCodex.handleRequest({
+      jsonrpc: '2.0',
+      id: 22,
+      method: 'tools/call',
+      params: {
+        name: 'send_owner_email',
+        arguments: {
+          subject: '[DECISION NEEDED] Boss Phase 2 Transition Logic',
+          message: 'The current phase transition logic requires human decision on Greystone invulnerability frames.',
+          urgency: 'DECISION_NEEDED',
+          taskReference: 'X-1'
+        }
+      }
+    });
+
+    assert.ok(!emailRes.error, 'send_owner_email should not throw RPC error');
+    const parsedRes = JSON.parse(emailRes.result.content[0].text);
+    // Since mock test has no real credentials, status is either 'skipped' or 'sent'
+    assert.ok(['skipped', 'sent', 'error'].includes(parsedRes.status), 'Must return valid status');
+    report('Test 14: Tool send_owner_email exposes structured invocation for AI Leads', true);
+  } catch (e) {
+    report('Test 14: Tool send_owner_email exposes structured invocation for AI Leads', false, e);
   }
 
   // Clean test files

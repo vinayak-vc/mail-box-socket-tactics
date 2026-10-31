@@ -8,5 +8,5 @@ echo WebSocket: ws://127.0.0.1:8765/
 echo.
 
 start http://127.0.0.1:8766/
-node src\service\ServiceRunner.js --all
+node src\service\ServiceRunner.js --broker
 pause

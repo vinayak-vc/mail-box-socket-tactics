@@ -1,18 +1,9 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  Bot, 
-  ListTodo, 
-  Mail, 
-  FileText, 
-  Activity, 
-  UserPlus, 
-  Settings,
-  Zap 
-} from 'lucide-react';
+import { Bot, Mail, Activity, Settings, TrendingUp } from 'lucide-react';
 import { SystemSnapshot } from '../types';
 
 export type NavTab = 
+  | 'progress'
   | 'overview' 
   | 'agents' 
   | 'tasks' 
@@ -31,19 +22,16 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, snapshot }) => {
   const connectedAgentsCount = snapshot?.agents.filter(a => a.connected).length || 0;
-  const runningTasksCount = snapshot?.tasks.runningCount || 0;
   const totalMessagesCount = snapshot?.mailbox.totalMessages || 0;
 
+  // Monitoring-only navigation. The broker task queue, logs, usage and agent wizard views still exist
+  // in the codebase but are not offered here.
   const navItems = [
-    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-    { id: 'agents', label: 'AI Agents', icon: Bot, badge: connectedAgentsCount ? `${connectedAgentsCount}` : undefined },
-    { id: 'tasks', label: 'Task Queue', icon: ListTodo, badge: runningTasksCount ? `${runningTasksCount}` : undefined },
+    { id: 'progress', label: 'Progress', icon: TrendingUp },
     { id: 'mailbox', label: 'Mailbox', icon: Mail, badge: totalMessagesCount ? `${totalMessagesCount}` : undefined },
-    { id: 'logs', label: 'Message Logs', icon: FileText },
-    { id: 'timeline', label: 'Activity Timeline', icon: Activity },
-    { id: 'ai-usage', label: 'AI Usage', icon: Zap },
-    { id: 'add-agent', label: 'Add AI Agent', icon: UserPlus },
-    { id: 'settings', label: 'System Settings', icon: Settings },
+    { id: 'agents', label: 'AI Agents', icon: Bot, badge: connectedAgentsCount ? `${connectedAgentsCount}` : undefined },
+    { id: 'timeline', label: 'Activity', icon: Activity },
+    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (

@@ -11,10 +11,22 @@ param(
     [string]$BodyFile = '',
     [string]$Mailbox = '',
     [int]$HttpPort = 8766,
-    [string]$AuthToken = 'mailbox-socket-secret-token'
+    [string]$AuthToken = ''
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Resolve the broker auth token: explicit -AuthToken, then $env:MAILBOX_AUTH_TOKEN, then config\.env.
+# No built-in default token: the token is a secret and must never be hardcoded.
+if (-not $AuthToken) { $AuthToken = $env:MAILBOX_AUTH_TOKEN }
+if (-not $AuthToken) {
+    $envFile = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\.env'
+    if (Test-Path $envFile) {
+        $line = Select-String -Path $envFile -Pattern '^\s*MAILBOX_AUTH_TOKEN\s*=\s*(.+)$' | Select-Object -First 1
+        if ($line) { $AuthToken = $line.Matches[0].Groups[1].Value.Trim() }
+    }
+}
+
 
 if (-not $Mailbox) {
     $scriptDir = $PSScriptRoot

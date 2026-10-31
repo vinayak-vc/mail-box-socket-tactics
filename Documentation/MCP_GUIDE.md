@@ -80,6 +80,7 @@ The bound identity cannot be overridden by tool parameters. For example:
 | `get_message_history` | `limit` (opt) | Returns conversation history involving this agent. |
 | `get_agent_status` | `agentId` (opt) | Inspects the configuration and online status of any team member. |
 | `heartbeat` | *(none)* | Confirms active connectivity and timestamps agent activity. |
+| `send_owner_email` | `subject`, `message`, `urgency` (opt), `taskReference` (opt) | Sends an email notification directly to the Human Owner via Brevo transactional email. Use for urgent blockers, decisions needed, or critical milestones. |
 
 ---
 

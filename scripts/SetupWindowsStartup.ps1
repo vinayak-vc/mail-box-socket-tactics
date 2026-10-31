@@ -27,7 +27,7 @@ if ($RemoveTask) {
 
 Write-Host "Configuring Windows Startup for MailBox Socket Tactics (Mode: $Trigger)..." -ForegroundColor Cyan
 
-$action = New-ScheduledTaskAction -Execute 'node.exe' -Argument "`"$serviceRunner`" --all" -WorkingDirectory $projectRoot
+$action = New-ScheduledTaskAction -Execute 'node.exe' -Argument "`"$serviceRunner`" --broker" -WorkingDirectory $projectRoot
 
 if ($Trigger -eq 'Boot') {
     $taskTrigger = New-ScheduledTaskTrigger -AtStartup
@@ -49,7 +49,7 @@ catch {
         Write-Host "Falling back to Windows User Startup folder..." -ForegroundColor Cyan
         $startupDir = [Environment]::GetFolderPath('Startup')
         $shortcutPath = Join-Path $startupDir 'MailBoxSocketTactics.bat'
-        $batContent = "@echo off`r`ncd /d `"$projectRoot`"`r`nstart `"`" /b node `"$serviceRunner`" --all`r`n"
+        $batContent = "@echo off`r`ncd /d `"$projectRoot`"`r`nstart `"`" /b node `"$serviceRunner`" --broker`r`n"
         [System.IO.File]::WriteAllText($shortcutPath, $batContent)
         Write-Host "Created startup launcher at: $shortcutPath" -ForegroundColor Green
     } else {

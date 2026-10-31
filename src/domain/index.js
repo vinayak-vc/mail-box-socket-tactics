@@ -8,6 +8,8 @@ const MailboxDomainService = require('./MailboxDomainService');
 const TaskDomainService = require('./TaskDomainService');
 const AgentDomainService = require('./AgentDomainService');
 const UsageDomainService = require('./UsageDomainService');
+const ProgressDomainService = require('./ProgressDomainService');
+const EmailDomainService = require('./EmailDomainService');
 
 function createDomainServices(options = {}) {
   const mailboxService = new MailboxDomainService({
@@ -31,11 +33,23 @@ function createDomainServices(options = {}) {
     storagePath: options.usageStoragePath
   });
 
+  const progressService = new ProgressDomainService({
+    mailboxPath: options.mailboxPath,
+    docsDir: options.docsDir
+  });
+
+  const emailService = new EmailDomainService({
+    envPath: options.envPath,
+    logger: options.logger
+  });
+
   return {
+    progressService,
     mailboxService,
     taskService,
     agentService,
-    usageService
+    usageService,
+    emailService
   };
 }
 
@@ -44,5 +58,7 @@ module.exports = {
   MailboxDomainService,
   TaskDomainService,
   AgentDomainService,
-  UsageDomainService
+  UsageDomainService,
+  ProgressDomainService,
+  EmailDomainService
 };

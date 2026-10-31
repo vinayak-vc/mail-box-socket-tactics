@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
+import { ProgressView } from './views/ProgressView';
 import { OverviewView } from './views/OverviewView';
 import { AgentsView } from './views/AgentsView';
 import { TaskQueueView } from './views/TaskQueueView';
@@ -14,7 +15,7 @@ import { SystemSnapshot } from './types';
 import { client } from './api';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<NavTab>('overview');
+  const [activeTab, setActiveTab] = useState<NavTab>('progress');
   const [snapshot, setSnapshot] = useState<SystemSnapshot | null>(null);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,8 @@ export const App: React.FC = () => {
 
   const renderActiveView = () => {
     switch (activeTab) {
+      case 'progress':
+        return <ProgressView />;
       case 'overview':
         return <OverviewView snapshot={snapshot} onRefresh={refreshSnapshot} />;
       case 'agents':
@@ -77,7 +80,7 @@ export const App: React.FC = () => {
       case 'settings':
         return <SettingsView snapshot={snapshot} />;
       default:
-        return <OverviewView snapshot={snapshot} onRefresh={refreshSnapshot} />;
+        return <ProgressView />;
     }
   };
 

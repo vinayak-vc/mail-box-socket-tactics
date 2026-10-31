@@ -481,15 +481,17 @@ class EventBroker {
     for (const [msgId, task] of this.stateStore.tasks.entries()) {
       if ((task.status === PROCESSING_STATUS.CLAIMED || task.status === PROCESSING_STATUS.RUNNING) &&
           task.leaseExpiresAt > 0 && now > task.leaseExpiresAt) {
-        console.warn(`[EventBroker] Lease expired for message ${msgId} assigned to ${task.claimOwner}`);
-        const failResult = this.stateStore.markFailed(msgId, task.claimOwner, 'Lease expired without renewal or completion');
+        // markFailed clears claimOwner, so capture it first for logging
+        const expiredOwner = task.claimOwner;
+        console.warn(`[EventBroker] Lease expired for message ${msgId} assigned to ${expiredOwner}`);
+        const failResult = this.stateStore.markFailed(msgId, expiredOwner, 'Lease expired without renewal or completion');
 
         this.logger.log({
           level: 'WARN',
           type: 'LEASE_EXPIRED',
           messageId: msgId,
-          agentId: task.claimOwner,
-          summary: `Lease expired for message ${msgId} assigned to ${task.claimOwner}`
+          agentId: expiredOwner,
+          summary: `Lease expired for message ${msgId} assigned to ${expiredOwner}`
         });
 
         if (failResult.retry) {
@@ -795,6 +797,20 @@ class EventBroker {
   }
 
   /**
+   * True only for a browser talking to the broker directly on this machine.
+   * Requests arriving through the zrok tunnel (or any reverse proxy) carry a
+   * non-loopback Host header and/or forwarding headers, so they never receive
+   * the auth token and must supply it themselves.
+   */
+  isLocalBrowserRequest(req) {
+    if (req.headers['x-forwarded-for'] || req.headers['x-forwarded-host'] || req.headers['forwarded']) {
+      return false;
+    }
+    const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]';
+  }
+
+  /**
    * Serves static assets from client/dist
    */
   serveStaticFile(req, res, pathname) {
@@ -830,6 +846,11 @@ class EventBroker {
     try {
       if (ext === '.html') {
         let html = fs.readFileSync(filePath, 'utf8');
+        if (!this.isLocalBrowserRequest(req)) {
+          // Remote (tunnelled) viewers get the UI without the auth token
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          return res.end(html);
+        }
         const injection = `<script>window.__MST_CONFIG__ = Object.assign(window.__MST_CONFIG__ || {}, { authToken: ${JSON.stringify(this.authToken)} });</script>`;
         if (html.includes('<head>')) {
           html = html.replace('<head>', `<head>${injection}`);
@@ -892,14 +913,24 @@ class EventBroker {
       req.on('error', reject);
     });
 
-    // Public endpoint for UI bootstrap configuration (token, ports)
+    // Read-only data endpoints: a tunnelled/remote viewer must present the token.
+    // A browser on this machine keeps working without it.
+    if (req.method === 'GET' &&
+        (url.pathname.startsWith('/api/') || url.pathname === '/health' || url.pathname === '/status') &&
+        url.pathname !== '/api/config' &&
+        !this.isLocalBrowserRequest(req) && !verifyAuth()) {
+      this.metrics.authFailures++;
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Unauthorized: missing or invalid Bearer token' }));
+    }
+
+    // UI bootstrap configuration. The auth token is only disclosed to a
+    // browser on this machine, never to tunnelled/proxied requests.
     if (req.method === 'GET' && url.pathname === '/api/config') {
+      const cfg = { wsPort: this.port, httpPort: this.httpPort };
+      if (this.isLocalBrowserRequest(req)) cfg.authToken = this.authToken;
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
-        authToken: this.authToken,
-        wsPort: this.port,
-        httpPort: this.httpPort
-      }));
+      return res.end(JSON.stringify(cfg));
     }
 
     // 1. Existing /health and /status endpoints
@@ -1085,6 +1116,19 @@ class EventBroker {
       return;
     }
 
+    // GET /api/progress (read-only project progress parsed from the markdown docs + AI conversation)
+    if (req.method === 'GET' && url.pathname === '/api/progress') {
+      try {
+        const limit = Math.min(Math.max(parseInt(url.searchParams.get('messages') || '25', 10) || 25, 1), 100);
+        const progress = this.domainServices.progressService.getProgress({ messageLimit: limit });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(progress));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
     // 5. GET /api/agents (List all registered agents)
     if (req.method === 'GET' && url.pathname === '/api/agents') {
       const agents = this.agentRegistry.getAll();
@@ -1267,6 +1311,60 @@ class EventBroker {
       const summary = this.domainServices ? this.domainServices.usageService.getUsageSummary() : {};
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(summary));
+    }
+
+    // 11d. GET /api/notify/status (Email notification configuration status)
+    if (req.method === 'GET' && url.pathname === '/api/notify/status') {
+      const emailStatus = this.domainServices?.emailService ? this.domainServices.emailService.getStatus() : { enabled: false };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(emailStatus));
+    }
+
+    // 11e. POST /api/notify/owner (Send direct notification email to the human owner)
+    if (req.method === 'POST' && url.pathname === '/api/notify/owner') {
+      if (!verifyAuth()) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Unauthorized: missing or invalid Bearer token' }));
+      }
+
+      readJsonBody().then(async (bodyData) => {
+        try {
+          const { senderAgent, subject, message, urgency, taskReference } = bodyData;
+          if (!subject || !message) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: "Missing required fields: 'subject', 'message'" }));
+          }
+          if (!this.domainServices?.emailService) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: 'Email service not initialized' }));
+          }
+
+          const result = await this.domainServices.emailService.sendOwnerEmail({
+            senderAgent: senderAgent || 'Human Owner / Control Center',
+            subject,
+            message,
+            urgency: urgency || 'GENERAL_UPDATE',
+            taskReference: taskReference || null
+          });
+
+          this.logger.log({
+            level: result.status === 'error' ? 'ERROR' : 'INFO',
+            type: 'OWNER_EMAIL_DISPATCHED',
+            agentId: senderAgent || 'Operator',
+            summary: `Owner email dispatched: '${subject}' (${result.status})`
+          });
+
+          res.writeHead(result.status === 'error' ? 500 : 200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      }).catch(err => {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
     }
 
     // 12. GET /api/mailbox (Get messages parsed from TEAM_MAILBOX.md)

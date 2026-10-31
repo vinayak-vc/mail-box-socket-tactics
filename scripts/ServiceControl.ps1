@@ -3,7 +3,7 @@
 # Actions: start, stop, restart, status
 param(
     [Parameter(Mandatory = $true)][ValidateSet('start', 'stop', 'restart', 'status')][string]$Action,
-    [ValidateSet('all', 'broker', 'adapters')][string]$Mode = 'all'
+    [ValidateSet('all', 'broker', 'adapters')][string]$Mode = 'broker'
 )
 
 $scriptDir = $PSScriptRoot
@@ -29,8 +29,8 @@ function Release-ZrokShares {
     if (-not $zrokBin -and (Test-Path "C:\scrcpy-win64-v2.4\zrok2.exe")) { $zrokBin = "C:\scrcpy-win64-v2.4\zrok2.exe" }
     if ($zrokBin) {
         try {
-            $rawJson = cmd /c "`"$zrokBin`" list shares --json 2>nul"
-            if (-not $rawJson) { $rawJson = cmd /c "`"$zrokBin`" overview --json 2>nul" }
+            $rawJson = cmd /c "`"$zrokBin`" overview --json 2>nul"
+            if (-not $rawJson) { $rawJson = cmd /c "`"$zrokBin`" list shares --json 2>nul" }
             if ($rawJson) {
                 $str = $rawJson -join "`n"
                 $sIdx = $str.IndexOf('{')
@@ -47,10 +47,19 @@ function Release-ZrokShares {
                     }
                     foreach ($s in $sharesList) {
                         $tgt = if ($s.target) { $s.target } else { $s.backendProxyEndpoint }
-                        if ($tgt -match ':8766' -and -not $s.reserved) {
+                        $hasEp = if ($s.frontendEndpoints) { ($s.frontendEndpoints -join ' ') -match 'mailsocket' } else { $false }
+                        if (($tgt -match ':8766' -or $hasEp) -and $s.shareToken) {
                             Write-Host "[ServiceControl] Releasing zrok cloud share $($s.shareToken)..." -ForegroundColor Cyan
                             cmd /c "`"$zrokBin`" delete share $($s.shareToken) 2>nul" | Out-Null
                             cmd /c "`"$zrokBin`" release $($s.shareToken) 2>nul" | Out-Null
+                        }
+                    }
+                    if ($parsed.names) {
+                        foreach ($n in $parsed.names) {
+                            if ($n.name -eq 'mailsocket' -and $n.shareToken -and $n.shareToken -ne '-') {
+                                Write-Host "[ServiceControl] Releasing shareToken $($n.shareToken) from name $($n.name)..." -ForegroundColor Cyan
+                                cmd /c "`"$zrokBin`" delete share $($n.shareToken) 2>nul" | Out-Null
+                            }
                         }
                     }
                 }

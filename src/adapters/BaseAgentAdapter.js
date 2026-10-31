@@ -43,6 +43,54 @@ class BaseAgentAdapter {
     this.activeProcessing = new Set();
     this.activeRenewalTimers = new Map(); // messageId -> intervalTimer
     this.lastSeenNumber = options.initialSeenNumber || 0;
+
+    // Optional durable state (set by ServiceRunner). Without it the adapter is stateless (tests).
+    this.statePath = options.statePath || null;
+    // When false, messages addressed to several agents (or ALL) are not auto-dispatched to a headless CLI
+    this.dispatchBroadcast = options.dispatchBroadcast !== undefined ? options.dispatchBroadcast : true;
+    this.hasPersistedState = false;
+    this.loadState();
+  }
+
+  /**
+   * Loads the durable set of handled message IDs so a restart/reconnect never re-runs history
+   */
+  loadState() {
+    if (!this.statePath || !fs.existsSync(this.statePath)) return;
+    try {
+      const data = JSON.parse(fs.readFileSync(this.statePath, 'utf8'));
+      for (const id of data.processedMessageIds || []) this.processedMessageIds.add(id);
+      this.hasPersistedState = true;
+    } catch (err) {
+      console.warn(`[${this.agentId}Adapter] Could not read adapter state ${this.statePath}: ${err.message}`);
+    }
+  }
+
+  saveState() {
+    if (!this.statePath) return;
+    try {
+      fs.mkdirSync(path.dirname(this.statePath), { recursive: true });
+      const tmp = `${this.statePath}.tmp.${process.pid}`;
+      fs.writeFileSync(tmp, JSON.stringify({
+        version: 1,
+        lastUpdated: new Date().toISOString(),
+        processedMessageIds: Array.from(this.processedMessageIds)
+      }), 'utf8');
+      fs.renameSync(tmp, this.statePath);
+      this.hasPersistedState = true;
+    } catch (err) {
+      console.warn(`[${this.agentId}Adapter] Could not persist adapter state: ${err.message}`);
+    }
+  }
+
+  /**
+   * True when the recipient string targets more than one agent (or everyone).
+   * The human owner is not an agent, so "Claude,Owner" is a direct message.
+   */
+  isBroadcast(recipientRaw) {
+    const tokens = String(recipientRaw || '').toLowerCase().split(/[,/&]|\band\b/).map(t => t.trim()).filter(Boolean);
+    if (tokens.some(t => t === 'all' || t === 'everyone' || t === 'team')) return true;
+    return tokens.filter(t => !(t === 'owner' || t === 'human' || t === 'h' || t.startsWith('owner '))).length > 1;
   }
 
   /**
@@ -185,6 +233,14 @@ class BaseAgentAdapter {
       return; // Not for this agent
     }
 
+    // Broadcast messages are not auto-run by headless CLIs unless explicitly enabled (token/usage burn)
+    if (!this.dispatchBroadcast && this.isBroadcast(notify.recipientRaw)) {
+      console.log(`[${this.agentId}Adapter] ${messageId} is a multi-recipient broadcast (${notify.recipientRaw}); not auto-dispatching.`);
+      this.processedMessageIds.add(messageId);
+      this.saveState();
+      return;
+    }
+
     // Check duplicate in-memory
     if (this.processedMessageIds.has(messageId)) {
       console.log(`[${this.agentId}Adapter] Message ${messageId} already completed. Ignoring duplicate.`);
@@ -227,6 +283,7 @@ class BaseAgentAdapter {
 
       // Processing complete
       this.processedMessageIds.add(messageId);
+      this.saveState();
       if (authoritativeMessage.number > this.lastSeenNumber) {
         this.lastSeenNumber = authoritativeMessage.number;
       }
@@ -297,6 +354,15 @@ class BaseAgentAdapter {
       if (!fs.existsSync(this.mailboxPath)) return;
       const text = await fs.promises.readFile(this.mailboxPath, 'utf8');
       const messages = parseMailboxMessages(text);
+
+      // First ever run with durable state: treat existing history as already handled.
+      // Otherwise every restart would re-run the whole mailbox through the headless CLI.
+      if (this.statePath && !this.hasPersistedState) {
+        for (const msg of messages) this.processedMessageIds.add(msg.id);
+        this.saveState();
+        console.log(`[${this.agentId}Adapter] Catch-up baseline: ${messages.length} existing messages marked handled.`);
+        return;
+      }
 
       for (const msg of messages) {
         if (!this.processedMessageIds.has(msg.id) &&

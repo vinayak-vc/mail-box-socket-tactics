@@ -3,7 +3,7 @@
     "host": "127.0.0.1",
     "port": 8765,
     "httpPort": 8766,
-    "authToken": "mailbox-socket-secret-token",
+    "authToken": "",
     "heartbeatIntervalMs": 15000,
     "clientTimeoutMs": 35000,
     "leaseTimeoutMs": 120000,

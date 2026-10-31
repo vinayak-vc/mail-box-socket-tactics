@@ -73,6 +73,12 @@ function loadConfig() {
     config.zrok.binPath = process.env.ZROK_BIN;
   }
 
+  // The auth token is a secret: it must come from config/.env (or the environment), never a default
+  const tok = config.broker && config.broker.authToken;
+  if (!tok || tok === 'mailbox-socket-secret-token') {
+    throw new Error('MAILBOX_AUTH_TOKEN is not set (or is the old default). Set a random value in config/.env before starting.');
+  }
+
   // Validate authoritative mailbox path
   if (!fs.existsSync(config.mailbox.path)) {
     if (config.mailbox.fallbackPath && fs.existsSync(config.mailbox.fallbackPath)) {
@@ -223,6 +229,8 @@ async function main() {
     if (config.agents.Claude && config.agents.Claude.enabled) {
       const claude = new ClaudeAdapter({
         ...config.agents.Claude,
+        statePath: path.resolve(__dirname, '../../data/adapter_state_Claude.json'),
+        dispatchBroadcast: config.agents.Claude.dispatchBroadcast === true,
         brokerUrl,
         authToken: config.broker.authToken,
         mailboxPath: config.mailbox.path
@@ -234,6 +242,8 @@ async function main() {
     if (config.agents.Codex && config.agents.Codex.enabled) {
       const codex = new CodexAdapter({
         ...config.agents.Codex,
+        statePath: path.resolve(__dirname, '../../data/adapter_state_Codex.json'),
+        dispatchBroadcast: config.agents.Codex.dispatchBroadcast === true,
         brokerUrl,
         authToken: config.broker.authToken,
         mailboxPath: config.mailbox.path
@@ -245,6 +255,8 @@ async function main() {
     if (config.agents.Antigravity && config.agents.Antigravity.enabled) {
       const antigravity = new AntigravityAdapter({
         ...config.agents.Antigravity,
+        statePath: path.resolve(__dirname, '../../data/adapter_state_Antigravity.json'),
+        dispatchBroadcast: config.agents.Antigravity.dispatchBroadcast === true,
         brokerUrl,
         authToken: config.broker.authToken,
         mailboxPath: config.mailbox.path

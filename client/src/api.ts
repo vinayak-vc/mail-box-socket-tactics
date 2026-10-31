@@ -3,7 +3,7 @@
  * Real-time WebSocket connection manager and REST client for MailSocketTactics Control Center.
  */
 
-import { SystemSnapshot, Agent, Task, ActivityEvent, UsageSummary } from './types';
+import { SystemSnapshot, Agent, Task, ActivityEvent, UsageSummary, ProgressData } from './types';
 
 const isViteDev = window.location.port === '5173';
 const API_BASE = isViteDev ? 'http://127.0.0.1:8766' : '';
@@ -18,7 +18,7 @@ export function getAuthToken(): string {
     const stored = localStorage.getItem('mst_auth_token');
     if (stored) return stored;
   }
-  return 'mailbox-socket-secret-token';
+  return '';
 }
 
 export function setAuthToken(token: string): void {
@@ -53,6 +53,11 @@ class ControlCenterClient {
           }
         }
       } catch (_) {}
+    }
+    // Remote (tunnelled) viewers are not given the token; ask once and remember it locally
+    if (typeof window !== 'undefined' && !getAuthToken()) {
+      const entered = window.prompt('Enter the MailSocketTactics broker auth token:');
+      if (entered && entered.trim()) setAuthToken(entered.trim());
     }
     this.connectWs();
   }
@@ -127,6 +132,14 @@ class ControlCenterClient {
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     if (!res.ok) throw new Error(`Snapshot request failed with status ${res.status}`);
+    return res.json();
+  }
+
+  public async fetchProgress(): Promise<ProgressData> {
+    const res = await fetch(`${API_BASE}/api/progress?messages=30`, {
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+    });
+    if (!res.ok) throw new Error(res.status === 401 ? 'Unauthorized: token missing or wrong' : `Progress request failed (${res.status})`);
     return res.json();
   }
 
@@ -254,6 +267,28 @@ class ControlCenterClient {
 
   public getExportUrl(format: 'json' | 'csv'): string {
     return `${API_BASE}/api/logs?format=${format}`;
+  }
+
+  public async fetchEmailStatus(): Promise<{ enabled: boolean; hasApiKey?: boolean; ownerEmailMasked?: string }> {
+    const res = await fetch(`${API_BASE}/api/notify/status`);
+    if (!res.ok) return { enabled: false };
+    return res.json();
+  }
+
+  public async notifyOwner(payload: { subject: string; message: string; urgency?: string; taskReference?: string; senderAgent?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE}/api/notify/owner`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Notification failed' }));
+      throw new Error(err.error || 'Notification failed');
+    }
+    return res.json();
   }
 }
 
