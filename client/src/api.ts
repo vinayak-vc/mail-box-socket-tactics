@@ -28,6 +28,16 @@ export function setAuthToken(token: string): void {
   }
 }
 
+export function promptNewAuthToken(): void {
+  if (typeof window !== 'undefined') {
+    const entered = window.prompt('Enter new MAILBOX_AUTH_TOKEN:');
+    if (entered && entered.trim()) {
+      setAuthToken(entered.trim());
+      window.location.reload();
+    }
+  }
+}
+
 export type EventCallback = (eventType: string, data: any) => void;
 
 class ControlCenterClient {
@@ -92,15 +102,52 @@ class ControlCenterClient {
         try {
           const msg = JSON.parse(event.data);
 
-          if (msg.type === 'AUTH_RESPONSE' && msg.success) {
-            this.isConnected = true;
-            if (this.onConnectionChange) this.onConnectionChange(true);
+          if (msg.type === 'AUTH_RESPONSE') {
+            if (msg.success) {
+              this.isConnected = true;
+              if (this.onConnectionChange) this.onConnectionChange(true);
 
-            // Subscribe to dashboard events
-            this.ws?.send(JSON.stringify({
-              type: 'SUBSCRIBE',
-              channels: ['dashboard']
-            }));
+              // Subscribe to dashboard events
+              this.ws?.send(JSON.stringify({
+                type: 'SUBSCRIBE',
+                channels: ['dashboard']
+              }));
+            } else {
+              // Authentication rejected by broker (e.g. MAILBOX_AUTH_TOKEN changed in .env)
+              this.isConnected = false;
+              if (this.onConnectionChange) this.onConnectionChange(false);
+              localStorage.removeItem('mst_auth_token');
+              if ((window as any).__MST_CONFIG__) {
+                delete (window as any).__MST_CONFIG__.authToken;
+              }
+
+              // Close socket and stop retrying with the old invalid token
+              if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+              this.ws?.close();
+
+              setTimeout(async () => {
+                // Try fetching /api/config first (works on localhost)
+                try {
+                  const res = await fetch(`${API_BASE}/api/config`);
+                  if (res.ok) {
+                    const cfg = await res.json();
+                    if (cfg.authToken) {
+                      setAuthToken(cfg.authToken);
+                      this.connectWs();
+                      return;
+                    }
+                  }
+                } catch (_) {}
+
+                // If remote or /api/config did not disclose token, prompt user for the new token
+                const entered = window.prompt('MAILBOX_AUTH_TOKEN was changed or rejected by the broker.\nPlease enter the new MAILBOX_AUTH_TOKEN:');
+                if (entered && entered.trim()) {
+                  setAuthToken(entered.trim());
+                  this.connectWs();
+                }
+              }, 400);
+              return;
+            }
           }
 
           if (msg.type === 'PING') {
@@ -131,7 +178,12 @@ class ControlCenterClient {
     const res = await fetch(`${API_BASE}/api/snapshot`, {
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
-    if (!res.ok) throw new Error(`Snapshot request failed with status ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 401) {
+        localStorage.removeItem('mst_auth_token');
+      }
+      throw new Error(`Snapshot request failed with status ${res.status}`);
+    }
     return res.json();
   }
 

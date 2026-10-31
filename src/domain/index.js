@@ -40,7 +40,9 @@ function createDomainServices(options = {}) {
 
   const emailService = new EmailDomainService({
     envPath: options.envPath,
-    logger: options.logger
+    logger: options.logger,
+    getPublicUrl: options.getPublicUrl,
+    zrokManager: options.zrokManager
   });
 
   return {

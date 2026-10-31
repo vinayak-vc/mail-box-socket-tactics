@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Radio, Clock, Globe, Mail, Send, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { Radio, Clock, Globe, Mail, Send, X, AlertCircle, CheckCircle, Key } from 'lucide-react';
 import { SystemSnapshot } from '../types';
-import { client } from '../api';
+import { client, promptNewAuthToken } from '../api';
 
 interface TopNavProps {
   snapshot: SystemSnapshot | null;
@@ -91,6 +91,16 @@ export const TopNav: React.FC<TopNavProps> = ({ snapshot, wsConnected, onRefresh
         </div>
 
         <div className="top-right" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+            onClick={() => promptNewAuthToken()}
+            title="Update stored MAILBOX_AUTH_TOKEN"
+          >
+            <Key size={13} color="var(--color-warning)" />
+            <span>Update Token</span>
+          </button>
+
           <button
             className="btn btn-secondary btn-sm"
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}

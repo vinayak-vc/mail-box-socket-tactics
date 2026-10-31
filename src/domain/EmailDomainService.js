@@ -50,6 +50,30 @@ class EmailDomainService {
     this.envPath = options.envPath || path.resolve(__dirname, '../../config/.env');
     this.logger = options.logger || console;
     this.cachedConfig = null;
+    this.getPublicUrl = options.getPublicUrl || null;
+    this.zrokManager = options.zrokManager || null;
+  }
+
+  /**
+   * Resolves the current public zrok tunnel URL
+   */
+  getZrokUrl() {
+    if (typeof this.getPublicUrl === 'function') {
+      try {
+        const u = this.getPublicUrl();
+        if (u) return u.replace(/\/+$/, '');
+      } catch (_) {}
+    }
+    if (this.zrokManager && typeof this.zrokManager.getStatus === 'function') {
+      try {
+        const u = this.zrokManager.getStatus().publicUrl;
+        if (u) return u.replace(/\/+$/, '');
+      } catch (_) {}
+    }
+    if (process.env.ZROK_PUBLIC_URL) {
+      return process.env.ZROK_PUBLIC_URL.replace(/\/+$/, '');
+    }
+    return 'https://mailsocket.shares.zrok.io';
   }
 
   /**
@@ -171,7 +195,7 @@ class EmailDomainService {
   /**
    * Formats HTML email for AI Lead / Agent notifications to the Owner
    */
-  buildNotificationHtml({ senderAgent, subject, message, urgency = 'DECISION_NEEDED', taskReference = null, metadata = {} }) {
+  buildNotificationHtml({ senderAgent, subject, message, urgency = 'DECISION_NEEDED', taskReference = null, mailboxUrl = null, metadata = {} }) {
     const urgencyColors = {
       DECISION_NEEDED: { bg: '#fef3c7', text: '#92400e', border: '#f59e0b', label: 'DECISION NEEDED' },
       URGENT_BLOCKER: { bg: '#fee2e2', text: '#991b1b', border: '#ef4444', label: 'URGENT BLOCKER' },
@@ -182,6 +206,7 @@ class EmailDomainService {
 
     const urgencyStyle = urgencyColors[urgency] || urgencyColors.DECISION_NEEDED;
     const dateStr = new Date().toLocaleString('en-US', { timeZoneName: 'short' });
+    const targetMailboxUrl = mailboxUrl || `${this.getZrokUrl()}/?tab=mailbox`;
 
     // Format paragraphs from message
     const formattedMessageHtml = escapeHtml(message)
@@ -237,6 +262,24 @@ class EmailDomainService {
             </td>
           </tr>
 
+          <!-- Direct Mailbox Action Button -->
+          <tr>
+            <td align="center" style="padding: 0 28px 24px 28px;">
+              <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
+                <tr>
+                  <td align="center" style="background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%); border-radius: 8px; box-shadow: 0 4px 15px rgba(56, 189, 248, 0.35);">
+                    <a href="${escapeHtml(targetMailboxUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 14px 32px; font-size: 14px; font-weight: 700; color: #ffffff; text-decoration: none; border-radius: 8px; letter-spacing: -0.01em;">
+                      Open Live Mailbox Control Center &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <div style="margin-top: 12px; font-size: 11px; color: #94a3b8; font-family: monospace;">
+                Direct zrok link: <a href="${escapeHtml(targetMailboxUrl)}" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline;">${escapeHtml(targetMailboxUrl)}</a>
+              </div>
+            </td>
+          </tr>
+
           <!-- Footer -->
           <tr>
             <td style="padding: 16px 28px; background-color: #0b1120; border-top: 1px solid #334155; font-size: 11px; color: #64748b; text-align: center;">
@@ -274,12 +317,16 @@ class EmailDomainService {
       throw new Error("Missing required fields: 'subject', 'message'");
     }
 
+    const zrokBase = this.getZrokUrl();
+    const effectiveMailboxUrl = metadata?.mailboxUrl || `${zrokBase}/?tab=mailbox`;
+
     const htmlContent = this.buildNotificationHtml({
       senderAgent,
       subject,
       message,
       urgency,
       taskReference,
+      mailboxUrl: effectiveMailboxUrl,
       metadata
     });
 
@@ -292,6 +339,9 @@ class EmailDomainService {
       '----------------------------------------',
       message,
       '----------------------------------------',
+      '',
+      'Open Mailbox in Control Center:',
+      effectiveMailboxUrl,
       '',
       'Authoritative Mailbox: TEAM_MAILBOX.md'
     ].filter(Boolean).join('\n');

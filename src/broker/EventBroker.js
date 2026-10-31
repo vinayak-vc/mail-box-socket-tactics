@@ -72,6 +72,8 @@ class EventBroker {
       agentRegistry: this.agentRegistry,
       telemetryMap: this.agentTelemetry,
       logger: this.logger,
+      getPublicUrl: () => (this.zrokManager ? this.zrokManager.getStatus().publicUrl : null),
+      zrokManager: this.zrokManager,
       onEvent: (eventType, data) => this.broadcastDashboardEvent(eventType, data)
     });
 

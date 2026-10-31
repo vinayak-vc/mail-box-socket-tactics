@@ -12,10 +12,22 @@ import { AiUsageView } from './views/AiUsageView';
 import { AddAgentWizard } from './views/AddAgentWizard';
 import { SettingsView } from './views/SettingsView';
 import { SystemSnapshot } from './types';
-import { client } from './api';
+import { client, promptNewAuthToken } from './api';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<NavTab>('progress');
+  const getInitialTab = (): NavTab => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab') as NavTab;
+      const validTabs: NavTab[] = ['progress', 'overview', 'agents', 'tasks', 'mailbox', 'logs', 'timeline', 'ai-usage', 'add-agent', 'settings'];
+      if (tabParam && validTabs.includes(tabParam)) return tabParam;
+      const hash = window.location.hash.replace(/^#/, '') as NavTab;
+      if (hash && validTabs.includes(hash)) return hash;
+    }
+    return 'progress';
+  };
+
+  const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
   const [snapshot, setSnapshot] = useState<SystemSnapshot | null>(null);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,8 +102,15 @@ export const App: React.FC = () => {
       <div className="main-wrapper">
         <TopNav snapshot={snapshot} wsConnected={wsConnected} onRefresh={refreshSnapshot} />
         {error && !snapshot && (
-          <div style={{ padding: '12px 24px', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', fontSize: '13px' }}>
-            Connection error: {error}. Trying to connect to Event Broker...
+          <div style={{ padding: '12px 24px', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            <span>Connection error: {error}.</span>
+            <button
+              onClick={() => promptNewAuthToken()}
+              className="btn btn-secondary btn-sm"
+              style={{ flexShrink: 0 }}
+            >
+              Update Auth Token
+            </button>
           </div>
         )}
         {renderActiveView()}
