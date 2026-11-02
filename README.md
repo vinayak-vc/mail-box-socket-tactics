@@ -60,6 +60,12 @@ See [`Documentation/MCP_GUIDE.md`](file:///C:/UnrealProject/MailBoxSocketTactics
 
 ---
 
+## 3b. Team Workflow Playbook (reuse in any project)
+
+The method used with this framework (roles, append-only mailbox, 50-task queues in batches of 5 with the no-wait rule, evidence and review rules, short owner messages) is written down in [`Documentation/WORKFLOW_PLAYBOOK.md`](Documentation/WORKFLOW_PLAYBOOK.md), with copy-ready templates in [`Documentation/playbook/`](Documentation/playbook/) (queue, lead check prompt, agent onboarding prompts, owner message, memory seed).
+
+---
+
 ## 4. Directory Layout
 
 ```text
