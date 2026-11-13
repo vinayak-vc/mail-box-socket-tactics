@@ -11,11 +11,12 @@
 const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
+const WebSocket = require('ws');
 const { createDomainServices } = require('../domain');
 const StateStore = require('../broker/StateStore');
 const AgentRegistry = require('../broker/AgentRegistry');
 const ActivityLogger = require('../broker/ActivityLogger');
-const { normalizeAgentId } = require('../protocol/MessageProtocol');
+const { normalizeAgentId, EVENT_TYPES } = require('../protocol/MessageProtocol');
 
 class McpServer {
   constructor(options = {}) {
@@ -52,6 +53,164 @@ class McpServer {
 
     // Validate and bind identity
     this.canonicalAgent = this._resolveIdentity(this.agentId);
+
+    // Broker WebSocket bridge state
+    this.brokerConfig = this._loadBrokerConfig(options);
+    this._ws = null;
+    this._brokerAuthenticated = false;
+    this._reconnectTimer = null;
+    this._reconnectDelay = 2000;
+    this._isDestroyed = false;
+
+    if (options.connectBroker) {
+      this.connectBroker();
+    }
+  }
+
+  _loadBrokerConfig(options = {}) {
+    let token = options.authToken || process.env.MAILBOX_AUTH_TOKEN;
+    let wsPort = options.wsPort || (process.env.MAILBOX_WS_PORT ? parseInt(process.env.MAILBOX_WS_PORT, 10) : null);
+    let host = options.host || '127.0.0.1';
+
+    // 1. Try config/.env
+    const envPath = path.resolve(this.projectRoot, 'config/.env');
+    if (fs.existsSync(envPath)) {
+      try {
+        const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const eqIdx = trimmed.indexOf('=');
+          if (eqIdx !== -1) {
+            const k = trimmed.substring(0, eqIdx).trim();
+            const v = trimmed.substring(eqIdx + 1).trim();
+            if (k === 'MAILBOX_AUTH_TOKEN' && !token) token = v;
+            if (k === 'MAILBOX_WS_PORT' && !wsPort) wsPort = parseInt(v, 10);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Try config/default.json fallback
+    const configPath = path.resolve(this.projectRoot, 'config/default.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (cfg.broker) {
+          if (!token && cfg.broker.authToken) token = cfg.broker.authToken;
+          if (!wsPort && cfg.broker.port) wsPort = cfg.broker.port;
+          if (cfg.broker.host) host = cfg.broker.host;
+        }
+      } catch (_) {}
+    }
+
+    return {
+      authToken: token || 'ManchesterUnited',
+      wsPort: wsPort || 8765,
+      host: host || '127.0.0.1'
+    };
+  }
+
+  /**
+   * Connects to the local EventBroker via WebSocket for live presence and telemetry reporting
+   */
+  connectBroker(options = {}) {
+    if (this._ws || this._isDestroyed) return;
+
+    const host = options.host || this.brokerConfig.host || '127.0.0.1';
+    const port = options.port || this.brokerConfig.wsPort || 8765;
+    const url = options.url || `ws://${host}:${port}`;
+    const token = options.authToken || this.brokerConfig.authToken;
+
+    try {
+      const ws = new WebSocket(url);
+      this._ws = ws;
+
+      ws.on('open', () => {
+        this._reconnectDelay = 2000;
+        try {
+          ws.send(JSON.stringify({
+            type: EVENT_TYPES.AUTH_REQUEST,
+            agentId: this.canonicalAgent.id,
+            token: token
+          }));
+        } catch (_) {}
+      });
+
+      ws.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === EVENT_TYPES.AUTH_RESPONSE) {
+            if (msg.success) {
+              this._brokerAuthenticated = true;
+              try {
+                ws.send(JSON.stringify({
+                  type: EVENT_TYPES.SUBSCRIBE,
+                  channels: [this.canonicalAgent.id.toLowerCase()]
+                }));
+              } catch (_) {}
+            }
+          } else if (msg.type === EVENT_TYPES.PING) {
+            // Heartbeat response keeps agent presence alive in EventBroker
+            try {
+              ws.send(JSON.stringify({
+                type: EVENT_TYPES.PONG,
+                timestamp: new Date().toISOString()
+              }));
+            } catch (_) {}
+          }
+        } catch (_) {}
+      });
+
+      ws.on('close', () => {
+        this._ws = null;
+        this._brokerAuthenticated = false;
+        this._scheduleReconnect(options);
+      });
+
+      ws.on('error', () => {
+        // Never write to stdout (reserved for stdio JSON-RPC). Safely terminate to trigger reconnect.
+        try { ws.terminate(); } catch (_) {}
+      });
+    } catch (_) {
+      this._scheduleReconnect(options);
+    }
+  }
+
+  _scheduleReconnect(options) {
+    if (this._isDestroyed || this._reconnectTimer) return;
+    this._reconnectDelay = Math.min((this._reconnectDelay || 2000) * 1.5, 30000);
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      this.connectBroker(options);
+    }, this._reconnectDelay);
+  }
+
+  _sendToBroker(payload) {
+    if (this._ws && this._brokerAuthenticated && this._ws.readyState === WebSocket.OPEN) {
+      try {
+        this._ws.send(JSON.stringify(payload));
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  close() {
+    this._isDestroyed = true;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    if (this._ws) {
+      try {
+        this._ws.terminate();
+      } catch (_) {}
+      this._ws = null;
+    }
+    this._brokerAuthenticated = false;
   }
 
   _parseAgentArg() {
@@ -356,21 +515,35 @@ class McpServer {
 
       case 'claim_message': {
         if (!args.messageId) throw new Error("Argument 'messageId' is required");
-        return await this.services.taskService.claimMessage({
+        const res = await this.services.taskService.claimMessage({
           messageId: args.messageId,
           agentId: callerId,
           leaseMs: args.leaseMs || 120000
         });
+        this._sendToBroker({
+          type: EVENT_TYPES.MESSAGE_ACK,
+          messageId: args.messageId,
+          status: 'CLAIMED',
+          workerId: callerId
+        });
+        return res;
       }
 
       case 'acknowledge_message': {
         if (!args.messageId) throw new Error("Argument 'messageId' is required");
         const status = args.status === 'RUNNING' ? 'RUNNING' : 'CLAIMED';
-        return await this.services.taskService.updateStatus({
+        const res = await this.services.taskService.updateStatus({
           messageId: args.messageId,
           status,
           agentId: callerId
         });
+        this._sendToBroker({
+          type: EVENT_TYPES.MESSAGE_ACK,
+          messageId: args.messageId,
+          status,
+          workerId: callerId
+        });
+        return res;
       }
 
       case 'send_message': {
@@ -384,12 +557,19 @@ class McpServer {
 
       case 'update_task_status': {
         if (!args.messageId || !args.status) throw new Error("Arguments 'messageId' and 'status' are required");
-        return await this.services.taskService.updateStatus({
+        const res = await this.services.taskService.updateStatus({
           messageId: args.messageId,
           status: args.status,
           agentId: callerId,
           details: args.details
         });
+        this._sendToBroker({
+          type: EVENT_TYPES.MESSAGE_ACK,
+          messageId: args.messageId,
+          status: args.status,
+          workerId: callerId
+        });
+        return res;
       }
 
       case 'complete_task': {
@@ -401,6 +581,14 @@ class McpServer {
           evidence: args.evidence || {}
         });
 
+        this._sendToBroker({
+          type: EVENT_TYPES.MESSAGE_ACK,
+          messageId: args.messageId,
+          status: 'COMPLETED',
+          workerId: callerId,
+          evidence: args.evidence || {}
+        });
+
         // Record usage metric
         this.services.usageService.recordTaskUsage(callerId, 0, 0, 0);
         return res;
@@ -408,12 +596,20 @@ class McpServer {
 
       case 'fail_task': {
         if (!args.messageId || !args.error) throw new Error("Arguments 'messageId' and 'error' are required");
-        return await this.services.taskService.failTask({
+        const res = await this.services.taskService.failTask({
           messageId: args.messageId,
           agentId: callerId,
           error: args.error,
           isPermanent: !!args.isPermanent
         });
+        this._sendToBroker({
+          type: EVENT_TYPES.MESSAGE_ACK,
+          messageId: args.messageId,
+          status: 'FAILED',
+          workerId: callerId,
+          error: args.error
+        });
+        return res;
       }
 
       case 'get_task_history': {
@@ -438,9 +634,14 @@ class McpServer {
       }
 
       case 'heartbeat': {
+        this._sendToBroker({
+          type: EVENT_TYPES.PONG,
+          timestamp: new Date().toISOString()
+        });
         return {
           acknowledged: true,
           agentId: callerId,
+          connectedToBroker: !!this._brokerAuthenticated,
           timestamp: new Date().toISOString()
         };
       }
@@ -711,6 +912,9 @@ class McpServer {
    * Starts the stdio JSON-RPC loop for desktop client integration
    */
   startStdio() {
+    // Automatically establish background WebSocket bridge to local EventBroker for presence & telemetry
+    this.connectBroker();
+
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -737,8 +941,14 @@ class McpServer {
       }
     });
 
-    process.on('SIGINT', () => process.exit(0));
-    process.on('SIGTERM', () => process.exit(0));
+    const cleanup = () => {
+      this.close();
+      process.exit(0);
+    };
+
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
+    process.on('exit', () => this.close());
   }
 }
 

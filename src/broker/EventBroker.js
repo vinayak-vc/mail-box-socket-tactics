@@ -330,6 +330,17 @@ class EventBroker {
 
       // Auto-subscribe ONLY to own canonical name and party code, or dashboard
       const normId = clientState.agentId.toLowerCase();
+
+      // Terminate any stale existing connection for this same agent
+      for (const [otherWs, otherState] of this.clients.entries()) {
+        if (otherWs !== ws && otherState.authenticated && otherState.agentId && otherState.agentId.toLowerCase() === normId) {
+          try {
+            otherWs.terminate();
+          } catch (_) {}
+          this.clients.delete(otherWs);
+        }
+      }
+
       clientState.subscriptions.add(normId);
 
       if (normId === 'dashboard') {
@@ -434,6 +445,25 @@ class EventBroker {
 
       case EVENT_TYPES.REPLAY_REQUEST: {
         this.handleReplayRequest(ws, clientState, msg);
+        break;
+      }
+
+      case 'AGENT_STATUS_UPDATE': {
+        const normId = clientState.agentId.toLowerCase();
+        let telem = this.agentTelemetry.get(normId);
+        if (telem) {
+          if (msg.status) telem.status = msg.status;
+          if (msg.currentTaskId !== undefined) telem.currentTaskId = msg.currentTaskId;
+          if (msg.currentTaskTitle !== undefined) telem.currentTaskTitle = msg.currentTaskTitle;
+          telem.lastHeartbeat = new Date().toISOString();
+          telem.lastSeen = new Date().toISOString();
+        }
+        this.broadcastDashboardEvent('AGENT_STATUS_CHANGE', {
+          agentId: clientState.agentId,
+          status: msg.status || 'idle',
+          currentTaskId: msg.currentTaskId,
+          currentTaskTitle: msg.currentTaskTitle
+        });
         break;
       }
 
@@ -796,6 +826,20 @@ class EventBroker {
     } catch (_) {
       return [];
     }
+  }
+
+  /**
+   * Checks if an agent is currently connected and authenticated
+   */
+  isAgentConnected(agentId) {
+    if (!agentId) return false;
+    const norm = agentId.toLowerCase();
+    for (const [, state] of this.clients.entries()) {
+      if (state.authenticated && state.agentId && state.agentId.toLowerCase() === norm) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -1229,7 +1273,15 @@ class EventBroker {
       } else if (method === 'agentapi') {
         checkResult = { capable: true, status: 'AgentAPI Configured', details: 'Language server agentapi protocol configured' };
       } else if (method === 'mcp') {
-        checkResult = { capable: false, status: 'Configuration required', details: 'MCP server endpoint connection requires explicit bridge adapter' };
+        const isOnline = this.isAgentConnected(agentId);
+        const mcpScript = path.resolve(__dirname, '../mcp/McpServer.js');
+        if (isOnline) {
+          checkResult = { capable: true, status: 'Connected via MCP', details: `Active MCP session running for ${agentId}` };
+        } else if (fs.existsSync(mcpScript)) {
+          checkResult = { capable: true, status: 'MCP Ready', details: `MCP stdio server available at ${mcpScript} (--agent ${agentId})` };
+        } else {
+          checkResult = { capable: false, status: 'Configuration required', details: 'McpServer.js not found' };
+        }
       } else {
         checkResult = { capable: false, status: 'Configuration required', details: 'Custom adapter integration required' };
       }

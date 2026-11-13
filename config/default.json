@@ -26,7 +26,7 @@
       "partyCode": "C",
       "aliases": ["Claude", "Claude (Tech Lead)", "Claude (Interim Lead)"],
       "enabled": true,
-      "execMode": "cli",
+      "execMode": "mcp",
       "cliCommand": "claude",
       "cliArgs": ["-c", "-p"],
       "workingDir": "C:\\UnrealProject\\OneBossFight"
@@ -36,7 +36,7 @@
       "partyCode": "X",
       "aliases": ["Codex", "Codex (Tech Lead)", "Codex (Independent Critic)"],
       "enabled": true,
-      "execMode": "cli",
+      "execMode": "mcp",
       "cliCommand": "C:\\Users\\Rushit Vaghela\\AppData\\Local\\OpenAI\\Codex\\bin\\2993767bd1dfb009\\codex.exe",
       "cliArgs": ["exec", "resume", "--last"],
       "workingDir": "C:\\UnrealProject\\OneBossFight"

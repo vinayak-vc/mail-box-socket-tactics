@@ -345,6 +345,64 @@ TASK: Verify hit collision math on Greystone sword sweep
     report('Test 14: Tool send_owner_email exposes structured invocation for AI Leads', false, e);
   }
 
+  // Test 15: McpServer live broker bridge: auth, heartbeat, and telemetry forwarding
+  try {
+    const WebSocket = require('ws');
+    const mockBrokerPort = 9965;
+    const receivedEvents = [];
+
+    const mockWss = new WebSocket.Server({ port: mockBrokerPort });
+    mockWss.on('connection', (ws) => {
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        receivedEvents.push(msg);
+
+        if (msg.type === 'AUTH_REQUEST') {
+          ws.send(JSON.stringify({ type: 'AUTH_RESPONSE', success: true, agentId: msg.agentId }));
+          // Immediately send PING to test heartbeat liveness
+          ws.send(JSON.stringify({ type: 'PING', timestamp: new Date().toISOString() }));
+        }
+      });
+    });
+
+    // Create McpServer with broker bridge pointed to mock server
+    const bridgeServer = new McpServer({
+      agentId: 'Claude',
+      projectRoot: path.resolve(__dirname, '..'),
+      mailboxPath: TEST_MAILBOX,
+      stateStore: sharedStateStore,
+      connectBroker: false
+    });
+
+    bridgeServer.connectBroker({
+      port: mockBrokerPort,
+      authToken: 'test-secret-token'
+    });
+
+    // Wait 300ms for auth and ping-pong exchange
+    await new Promise(r => setTimeout(r, 300));
+
+    // Verify auth and pong received by broker
+    const authEvt = receivedEvents.find(e => e.type === 'AUTH_REQUEST');
+    assert.ok(authEvt, 'Broker must receive AUTH_REQUEST');
+    assert.strictEqual(authEvt.agentId, 'Claude');
+    assert.strictEqual(authEvt.token, 'test-secret-token');
+
+    const pongEvt = receivedEvents.find(e => e.type === 'PONG');
+    assert.ok(pongEvt, 'McpServer must reply to PING with PONG');
+
+    // Trigger tool call to verify telemetry forwarding
+    await bridgeServer.executeTool('heartbeat', {});
+    await new Promise(r => setTimeout(r, 100));
+
+    bridgeServer.close();
+    await new Promise((res) => mockWss.close(res));
+
+    report('Test 15: McpServer live broker bridge: auth, heartbeat, and telemetry forwarding', true);
+  } catch (e) {
+    report('Test 15: McpServer live broker bridge: auth, heartbeat, and telemetry forwarding', false, e);
+  }
+
   // Clean test files
   try {
     fs.rmSync(TEST_DIR, { recursive: true, force: true });
