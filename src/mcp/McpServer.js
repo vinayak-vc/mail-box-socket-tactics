@@ -425,6 +425,75 @@ class McpServer {
           },
           required: ['subject', 'message']
         }
+      },
+
+      // ─── Kanban Board Tools ─────────────────────────────────────
+      {
+        name: 'get_board',
+        description: 'Returns the full Kanban board state: columns and all tasks with their comments, history, assignee, and priority.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            column: { type: 'string', description: 'Optional: filter tasks by column (backlog, todo, in-progress, review, done)' },
+            assignee: { type: 'string', description: 'Optional: filter tasks by assignee agent ID' }
+          }
+        }
+      },
+      {
+        name: 'create_board_task',
+        description: 'Creates a new task on the Kanban board. Use this when you receive a task assignment or want to track a piece of work.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Short task title' },
+            description: { type: 'string', description: 'Detailed description of the work' },
+            column: { type: 'string', enum: ['backlog', 'todo', 'in-progress', 'review', 'done'], description: 'Target column (default: backlog)' },
+            assignee: { type: 'string', description: 'Agent ID to assign to (Claude, Codex, Antigravity)' },
+            priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Priority level (default: medium)' },
+            labels: { type: 'array', items: { type: 'string' }, description: 'Labels / tags for the task' }
+          },
+          required: ['title']
+        }
+      },
+      {
+        name: 'move_board_task',
+        description: 'Moves a board task to a different column. Use to update status as you work (e.g. move from todo to in-progress when starting, to review when done coding).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            taskId: { type: 'string', description: 'Board task ID (e.g. BT-1)' },
+            column: { type: 'string', enum: ['backlog', 'todo', 'in-progress', 'review', 'done'], description: 'Target column to move to' }
+          },
+          required: ['taskId', 'column']
+        }
+      },
+      {
+        name: 'add_board_comment',
+        description: 'Adds a comment to a board task. Use for progress updates, notes, questions, or status reports on a task.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            taskId: { type: 'string', description: 'Board task ID (e.g. BT-1)' },
+            text: { type: 'string', description: 'Comment text content' }
+          },
+          required: ['taskId', 'text']
+        }
+      },
+      {
+        name: 'update_board_task',
+        description: 'Updates a board task\'s fields (title, description, priority, labels, assignee).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            taskId: { type: 'string', description: 'Board task ID (e.g. BT-1)' },
+            title: { type: 'string', description: 'New title' },
+            description: { type: 'string', description: 'New description' },
+            priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'New priority' },
+            assignee: { type: 'string', description: 'New assignee agent ID' },
+            labels: { type: 'array', items: { type: 'string' }, description: 'New labels' }
+          },
+          required: ['taskId']
+        }
       }
     ];
   }
@@ -668,6 +737,53 @@ class McpServer {
           });
         }
         return res;
+      }
+
+      // ─── Kanban Board Tool Handlers ─────────────────────────────
+
+      case 'get_board': {
+        const board = this.services.boardService.getBoard();
+        if (args.column || args.assignee) {
+          const filtered = this.services.boardService.getTasks({
+            column: args.column,
+            assignee: args.assignee
+          });
+          return { columns: board.columns, tasks: filtered, taskCount: filtered.length };
+        }
+        return board;
+      }
+
+      case 'create_board_task': {
+        if (!args.title) throw new Error("Argument 'title' is required");
+        const task = this.services.boardService.createTask({
+          title: args.title,
+          description: args.description || '',
+          column: args.column || 'backlog',
+          assignee: args.assignee || null,
+          priority: args.priority || 'medium',
+          labels: args.labels || [],
+          createdBy: callerId
+        });
+        return { success: true, task };
+      }
+
+      case 'move_board_task': {
+        if (!args.taskId || !args.column) throw new Error("Arguments 'taskId' and 'column' are required");
+        const task = this.services.boardService.moveTask(args.taskId, args.column, callerId);
+        return { success: true, task };
+      }
+
+      case 'add_board_comment': {
+        if (!args.taskId || !args.text) throw new Error("Arguments 'taskId' and 'text' are required");
+        const comment = this.services.boardService.addComment(args.taskId, args.text, callerId);
+        return { success: true, comment };
+      }
+
+      case 'update_board_task': {
+        if (!args.taskId) throw new Error("Argument 'taskId' is required");
+        const { taskId, ...updates } = args;
+        const task = this.services.boardService.updateTask(taskId, updates, callerId);
+        return { success: true, task };
       }
 
       default:

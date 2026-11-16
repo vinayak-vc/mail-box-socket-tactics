@@ -1150,6 +1150,7 @@ class EventBroker {
             deadLetterCount: deadLetters.length
           },
           usage: this.domainServices ? this.domainServices.usageService.getUsageSummary() : null,
+          board: this.domainServices ? this.domainServices.boardService.getBoard() : { columns: [], tasks: [], taskCount: 0 },
           logs: this.logger.getEvents({ limit: 100 })
         };
 
@@ -1570,7 +1571,169 @@ class EventBroker {
       return;
     }
 
-    // 16. Fallback: Serve static UI files from client/dist (SPA)
+    // 16. GET /api/board (Full board snapshot)
+    if (req.method === 'GET' && url.pathname === '/api/board') {
+      const board = this.domainServices.boardService.getBoard();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(board));
+    }
+
+    // 16b. GET /api/board/tasks (Filtered task list)
+    if (req.method === 'GET' && url.pathname === '/api/board/tasks') {
+      const filters = {
+        column: url.searchParams.get('column') || undefined,
+        assignee: url.searchParams.get('assignee') || undefined,
+        priority: url.searchParams.get('priority') || undefined
+      };
+      const tasks = this.domainServices.boardService.getTasks(filters);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ tasks }));
+    }
+
+    // 16c. POST /api/board/tasks (Create new board task)
+    if (req.method === 'POST' && url.pathname === '/api/board/tasks') {
+      if (!verifyAuth()) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Unauthorized' }));
+      }
+
+      readJsonBody().then((body) => {
+        try {
+          const task = this.domainServices.boardService.createTask(body);
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, task }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      }).catch(err => {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
+    }
+
+    // 16d. POST /api/board/tasks/bulk (Create multiple tasks at once)
+    if (req.method === 'POST' && url.pathname === '/api/board/tasks/bulk') {
+      if (!verifyAuth()) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Unauthorized' }));
+      }
+
+      readJsonBody().then((body) => {
+        try {
+          const tasks = this.domainServices.boardService.createBulk(
+            body.tasks || [],
+            body.createdBy || 'Lead'
+          );
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, created: tasks.length, tasks }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      }).catch(err => {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
+    }
+
+    // 16e. PATCH /api/board/tasks/:id (Update task fields)
+    const boardTaskPatchMatch = url.pathname.match(/^\/api\/board\/tasks\/([^/]+)$/);
+    if (req.method === 'PATCH' && boardTaskPatchMatch) {
+      if (!verifyAuth()) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Unauthorized' }));
+      }
+
+      const taskId = decodeURIComponent(boardTaskPatchMatch[1]);
+      readJsonBody().then((body) => {
+        try {
+          const task = this.domainServices.boardService.updateTask(taskId, body, body.updatedBy || 'Dashboard');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, task }));
+        } catch (err) {
+          res.writeHead(err.message.includes('not found') ? 404 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      }).catch(err => {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
+    }
+
+    // 16f. POST /api/board/tasks/:id/move (Move task to another column)
+    const boardTaskMoveMatch = url.pathname.match(/^\/api\/board\/tasks\/([^/]+)\/move$/);
+    if (req.method === 'POST' && boardTaskMoveMatch) {
+      if (!verifyAuth()) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Unauthorized' }));
+      }
+
+      const taskId = decodeURIComponent(boardTaskMoveMatch[1]);
+      readJsonBody().then((body) => {
+        try {
+          const task = this.domainServices.boardService.moveTask(taskId, body.column, body.movedBy || 'Dashboard');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, task }));
+        } catch (err) {
+          res.writeHead(err.message.includes('not found') ? 404 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      }).catch(err => {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
+    }
+
+    // 16g. POST /api/board/tasks/:id/comment (Add comment to a task)
+    const boardCommentMatch = url.pathname.match(/^\/api\/board\/tasks\/([^/]+)\/comment$/);
+    if (req.method === 'POST' && boardCommentMatch) {
+      if (!verifyAuth()) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Unauthorized' }));
+      }
+
+      const taskId = decodeURIComponent(boardCommentMatch[1]);
+      readJsonBody().then((body) => {
+        try {
+          const comment = this.domainServices.boardService.addComment(taskId, body.text, body.author || 'Dashboard');
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, comment }));
+        } catch (err) {
+          res.writeHead(err.message.includes('not found') ? 404 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      }).catch(err => {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
+    }
+
+    // 16h. DELETE /api/board/tasks/:id (Delete a board task)
+    const boardDeleteMatch = url.pathname.match(/^\/api\/board\/tasks\/([^/]+)$/);
+    if (req.method === 'DELETE' && boardDeleteMatch) {
+      if (!verifyAuth()) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Unauthorized' }));
+      }
+
+      const taskId = decodeURIComponent(boardDeleteMatch[1]);
+      try {
+        const removed = this.domainServices.boardService.deleteTask(taskId, 'Dashboard');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, task: removed }));
+      } catch (err) {
+        res.writeHead(err.message.includes('not found') ? 404 : 400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    // 17. Fallback: Serve static UI files from client/dist (SPA)
     if (req.method === 'GET') {
       return this.serveStaticFile(req, res, url.pathname);
     }

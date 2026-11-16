@@ -11,6 +11,7 @@ import { ActivityTimelineView } from './views/ActivityTimelineView';
 import { AiUsageView } from './views/AiUsageView';
 import { AddAgentWizard } from './views/AddAgentWizard';
 import { SettingsView } from './views/SettingsView';
+import { KanbanBoardView } from './views/KanbanBoardView';
 import { SystemSnapshot } from './types';
 import { client, promptNewAuthToken } from './api';
 
@@ -19,7 +20,7 @@ export const App: React.FC = () => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab') as NavTab;
-      const validTabs: NavTab[] = ['progress', 'overview', 'agents', 'tasks', 'mailbox', 'logs', 'timeline', 'ai-usage', 'add-agent', 'settings'];
+      const validTabs: NavTab[] = ['progress', 'overview', 'agents', 'tasks', 'board', 'mailbox', 'logs', 'timeline', 'ai-usage', 'add-agent', 'settings'];
       if (tabParam && validTabs.includes(tabParam)) return tabParam;
       const hash = window.location.hash.replace(/^#/, '') as NavTab;
       if (hash && validTabs.includes(hash)) return hash;
@@ -79,6 +80,8 @@ export const App: React.FC = () => {
         return <AgentsView snapshot={snapshot} onRefresh={refreshSnapshot} />;
       case 'tasks':
         return <TaskQueueView snapshot={snapshot} onRefresh={refreshSnapshot} />;
+      case 'board':
+        return <KanbanBoardView snapshot={snapshot} onRefresh={refreshSnapshot} />;
       case 'mailbox':
         return <MailboxView snapshot={snapshot} onRefresh={refreshSnapshot} />;
       case 'logs':

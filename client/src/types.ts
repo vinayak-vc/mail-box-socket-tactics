@@ -135,6 +135,47 @@ export interface SystemSnapshot {
   };
   logs: ActivityEvent[];
   usage?: UsageSummary | null;
+  board?: BoardData | null;
+}
+
+// ─── Kanban Board Types ───────────────────────────────────────────
+
+export type BoardColumn = 'backlog' | 'todo' | 'in-progress' | 'review' | 'done';
+export type BoardPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export interface BoardComment {
+  id: string;
+  author: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface BoardHistoryEntry {
+  action: string;
+  by: string;
+  at: string;
+  detail: string;
+}
+
+export interface BoardTask {
+  id: string;
+  title: string;
+  description: string;
+  column: BoardColumn;
+  assignee: string | null;
+  priority: BoardPriority;
+  labels: string[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  comments: BoardComment[];
+  history: BoardHistoryEntry[];
+}
+
+export interface BoardData {
+  columns: BoardColumn[];
+  tasks: BoardTask[];
+  taskCount: number;
 }
 
 export interface QuotaItem {

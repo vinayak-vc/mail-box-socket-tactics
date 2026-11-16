@@ -10,6 +10,7 @@ const AgentDomainService = require('./AgentDomainService');
 const UsageDomainService = require('./UsageDomainService');
 const ProgressDomainService = require('./ProgressDomainService');
 const EmailDomainService = require('./EmailDomainService');
+const BoardDomainService = require('./BoardDomainService');
 
 function createDomainServices(options = {}) {
   const mailboxService = new MailboxDomainService({
@@ -45,13 +46,20 @@ function createDomainServices(options = {}) {
     zrokManager: options.zrokManager
   });
 
+  const boardService = new BoardDomainService({
+    storagePath: options.boardStoragePath,
+    logger: options.logger,
+    onEvent: options.onEvent || (() => {})
+  });
+
   return {
     progressService,
     mailboxService,
     taskService,
     agentService,
     usageService,
-    emailService
+    emailService,
+    boardService
   };
 }
 
@@ -62,5 +70,6 @@ module.exports = {
   AgentDomainService,
   UsageDomainService,
   ProgressDomainService,
-  EmailDomainService
+  EmailDomainService,
+  BoardDomainService
 };

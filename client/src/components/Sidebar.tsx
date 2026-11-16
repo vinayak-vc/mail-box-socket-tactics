@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Mail, Activity, Settings, TrendingUp } from 'lucide-react';
+import { Bot, Mail, Activity, Settings, TrendingUp, LayoutGrid } from 'lucide-react';
 import { SystemSnapshot } from '../types';
 
 export type NavTab = 
@@ -7,6 +7,7 @@ export type NavTab =
   | 'overview' 
   | 'agents' 
   | 'tasks' 
+  | 'board'
   | 'mailbox' 
   | 'logs' 
   | 'timeline' 
@@ -28,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, snapsh
   // in the codebase but are not offered here.
   const navItems = [
     { id: 'progress', label: 'Progress', icon: TrendingUp },
+    { id: 'board', label: 'Board', icon: LayoutGrid, badge: (snapshot?.board?.taskCount || 0) > 0 ? `${snapshot?.board?.taskCount}` : undefined },
     { id: 'mailbox', label: 'Mailbox', icon: Mail, badge: totalMessagesCount ? `${totalMessagesCount}` : undefined },
     { id: 'agents', label: 'AI Agents', icon: Bot, badge: connectedAgentsCount ? `${connectedAgentsCount}` : undefined },
     { id: 'timeline', label: 'Activity', icon: Activity },

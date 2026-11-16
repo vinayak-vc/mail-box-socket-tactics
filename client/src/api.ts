@@ -3,7 +3,7 @@
  * Real-time WebSocket connection manager and REST client for MailSocketTactics Control Center.
  */
 
-import { SystemSnapshot, Agent, Task, ActivityEvent, UsageSummary, ProgressData } from './types';
+import { SystemSnapshot, Agent, Task, ActivityEvent, UsageSummary, ProgressData, BoardData, BoardTask, BoardComment } from './types';
 
 const isViteDev = window.location.port === '5173';
 const API_BASE = isViteDev ? 'http://127.0.0.1:8766' : '';
@@ -341,6 +341,127 @@ class ControlCenterClient {
       throw new Error(err.error || 'Notification failed');
     }
     return res.json();
+  }
+
+  // ─── Kanban Board API ─────────────────────────────────────────
+
+  public async fetchBoard(): Promise<BoardData> {
+    const res = await fetch(`${API_BASE}/api/board`, {
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+    });
+    if (!res.ok) throw new Error(`Board fetch failed (${res.status})`);
+    return res.json();
+  }
+
+  public async createBoardTask(params: {
+    title: string;
+    description?: string;
+    column?: string;
+    assignee?: string;
+    priority?: string;
+    labels?: string[];
+    createdBy?: string;
+  }): Promise<BoardTask> {
+    const res = await fetch(`${API_BASE}/api/board/tasks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      body: JSON.stringify(params)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Create failed' }));
+      throw new Error(err.error || 'Create failed');
+    }
+    const data = await res.json();
+    return data.task;
+  }
+
+  public async createBoardTasksBulk(tasks: Array<{
+    title: string;
+    description?: string;
+    column?: string;
+    assignee?: string;
+    priority?: string;
+    labels?: string[];
+  }>, createdBy?: string): Promise<BoardTask[]> {
+    const res = await fetch(`${API_BASE}/api/board/tasks/bulk`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      body: JSON.stringify({ tasks, createdBy })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Bulk create failed' }));
+      throw new Error(err.error || 'Bulk create failed');
+    }
+    const data = await res.json();
+    return data.tasks;
+  }
+
+  public async updateBoardTask(taskId: string, updates: Partial<BoardTask> & { updatedBy?: string }): Promise<BoardTask> {
+    const res = await fetch(`${API_BASE}/api/board/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      body: JSON.stringify(updates)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Update failed' }));
+      throw new Error(err.error || 'Update failed');
+    }
+    const data = await res.json();
+    return data.task;
+  }
+
+  public async moveBoardTask(taskId: string, column: string, movedBy?: string): Promise<BoardTask> {
+    const res = await fetch(`${API_BASE}/api/board/tasks/${encodeURIComponent(taskId)}/move`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      body: JSON.stringify({ column, movedBy })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Move failed' }));
+      throw new Error(err.error || 'Move failed');
+    }
+    const data = await res.json();
+    return data.task;
+  }
+
+  public async addBoardTaskComment(taskId: string, text: string, author?: string): Promise<BoardComment> {
+    const res = await fetch(`${API_BASE}/api/board/tasks/${encodeURIComponent(taskId)}/comment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`
+      },
+      body: JSON.stringify({ text, author })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Comment failed' }));
+      throw new Error(err.error || 'Comment failed');
+    }
+    const data = await res.json();
+    return data.comment;
+  }
+
+  public async deleteBoardTask(taskId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/board/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Delete failed' }));
+      throw new Error(err.error || 'Delete failed');
+    }
   }
 }
 

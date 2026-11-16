@@ -17,6 +17,9 @@ The lead decides routine additive choices (new project-owned files, maps, fixtur
 ## feedback-mailbox-channel
 The mailbox is the whole channel; post only with the append-only script (named mutex, own id); bodies in files; assignees always post a finish message (a report file alone does not wake anyone); event-driven waiting, no polling loops.
 
+## feedback-kanban-board-sync
+Always sync work on the MailSocketTactics Kanban board: `create_board_task` for tasks, `move_board_task(id, 'in-progress')` when starting, `add_board_comment(id, text)` for notes/blockers, `move_board_task(id, 'review')` for evaluation, `move_board_task(id, 'done')` when approved.
+
 ## feedback-evidence-and-review
 No pass without raw log + sha256 + pre/post state; failures kept (`*_FAIL_<reason>`); review against raw files; epsilon in the rule not the test; one heavy-tool process at a time; close the editor before building; detached long runs; log watchers wait for a marker only the new run prints.
 
@@ -36,6 +39,7 @@ Record every role change with its date and keep a handoff file; treat an agent's
 - [Lead delegation](feedback_lead_delegation.md) — decide additive choices; ask only irreversible/scope
 - [Task queue method](feedback_task_queue_method.md) — 50 tasks, batches of 5, no-wait, next 50 after
 - [Mailbox channel](feedback_mailbox_channel.md) — append-only script, finish messages, no polling
+- [Kanban board sync](feedback_kanban_board_sync.md) — create_board_task, in-progress, review, done via MCP
 - [Evidence and review](feedback_evidence_and_review.md) — raw logs, hashes, kept failures, raw-file review
 - [Commit policy](feedback_commit_policy.md) — who commits/pushes; owner decisions are final
 - [Sub-agent limit](feedback_subagent_limit.md) — max 3, read-only

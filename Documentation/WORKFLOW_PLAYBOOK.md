@@ -38,6 +38,20 @@ Roles change often (agents leave, come back). Record every swap in memory with a
 
 ---
 
+## 3b. The Kanban Board Synchronization Rule
+
+All multi-agent projects using MailSocketTactics must synchronize work on the Kanban board (via MCP tools or REST API):
+
+1. **Task Breakdown & Backlog**: When Lead breaks down work, tasks are created in `'todo'` or `'backlog'` with assignees, labels, and priority using `create_board_task(title, description, column, assignee, priority, labels)`.
+2. **Claiming / In Progress**: When an agent begins work on a task, it moves the task to `'in-progress'` using `move_board_task(taskId, 'in-progress')`.
+3. **Continuous Tracking & Comments**: Major decisions, progress notes, blockers, or evidence are added as comments on the card using `add_board_comment(taskId, text)`.
+4. **Review Gate**: When an implementation or batch is ready for evaluation/criticism, it moves to `'review'` using `move_board_task(taskId, 'review')`.
+5. **Closure / Done**: Once verified, approved, or accepted by the Lead/Reviewer, it moves to `'done'` using `move_board_task(taskId, 'done')`.
+
+This allows the human owner to track team execution in real-time on the Control Center dashboard without having to decipher hundreds of lines of mailbox text.
+
+---
+
 ## 4. Lead check loop (every ~10 minutes)
 
 Run on a recurring prompt (template: [`playbook/LEAD_CHECK_PROMPT.md`](playbook/LEAD_CHECK_PROMPT.md)):
