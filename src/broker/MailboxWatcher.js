@@ -26,6 +26,7 @@ class MailboxWatcher extends EventEmitter {
     this.debounceIntervalMs = options.debounceIntervalMs || 150;
     this.pollIntervalMs = options.pollIntervalMs || 10000; // Local check fallback, zero AI
     this.pollTimer = null;
+    this.reportedDuplicateHeaders = new Set(); // "id\nheaderLine" of duplicate headings already reported
 
     // Validate path on construction
     this.validatePath();
@@ -80,6 +81,8 @@ class MailboxWatcher extends EventEmitter {
         for (const msg of messages) {
           this.seenMessageIds.add(msg.id);
         }
+        // Duplicates already in the file at start-up are recorded without warning again on every restart
+        this._findNewDuplicates(messages);
         const stats = fs.statSync(this.mailboxPath);
         this.lastFileMtime = stats.mtimeMs;
         console.log(`[MailboxWatcher] Baseline initialized with ${messages.length} existing messages.`);
@@ -110,6 +113,12 @@ class MailboxWatcher extends EventEmitter {
         }
       }
 
+      // A second heading with an id already in the file is never dispatched (ids are the dedupe key).
+      // Tell the broker so it can log a warning instead of silently dropping it.
+      for (const dup of this._findNewDuplicates(messages)) {
+        this.emit('duplicate_id', { ...dup, mailboxPath: this.mailboxPath, project: this.projectId });
+      }
+
       for (const msg of newMessages) {
         this.emit('new_message', {
           messageId: msg.id,
@@ -130,6 +139,31 @@ class MailboxWatcher extends EventEmitter {
       this.emit('error', err);
       return [];
     }
+  }
+
+  /**
+   * Returns duplicate headings (2nd, 3rd... heading sharing an id) not reported before,
+   * and remembers them so each is reported once.
+   */
+  _findNewDuplicates(messages) {
+    const firstById = new Map();
+    const found = [];
+    for (const msg of messages) {
+      if (!firstById.has(msg.id)) {
+        firstById.set(msg.id, msg);
+        continue;
+      }
+      const key = `${msg.id}\n${msg.headerLine || ''}`;
+      if (this.reportedDuplicateHeaders.has(key)) continue;
+      this.reportedDuplicateHeaders.add(key);
+      found.push({
+        messageId: msg.id,
+        headerLine: msg.headerLine,
+        firstHeaderLine: firstById.get(msg.id).headerLine,
+        sender: msg.sender
+      });
+    }
+    return found;
   }
 
   /**

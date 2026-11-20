@@ -210,7 +210,112 @@ async function run() {
       assert.strictEqual(msgs[1].recipientRaw, 'A');
       assert.strictEqual(msgs[1].status, 'OPEN');
     });
+
+    // ─── Concurrency: many writers, one mutex, unique numbers ──────────────
+    const { spawn } = require('child_process');
+    const POST_SCRIPT = path.join(REPO_ROOT, 'scripts', 'MailboxPostSocket.ps1');
+    // Runs the post script in its own powershell.exe process; resolves with { code, out }
+    const postProcess = (args) => new Promise((resolve) => {
+      const p = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', POST_SCRIPT, ...args], { shell: false });
+      let out = '';
+      p.stdout.on('data', d => { out += d; });
+      p.stderr.on('data', d => { out += d; });
+      p.on('close', code => resolve({ code, out }));
+    });
+    const telIds = (file) => parseMailboxMessages(fs.readFileSync(file, 'utf8'), { format: 'tel' }).map(m => m.id);
+    const assertUniqueContiguous = (ids, from, to) => {
+      assert.strictEqual(new Set(ids).size, ids.length, `duplicate ids: ${ids.join(', ')}`);
+      const expected = [];
+      for (let n = from; n <= to; n++) expected.push(`MSG-${String(n).padStart(3, '0')}`);
+      assert.deepStrictEqual(ids.slice().sort(), expected);
+    };
+
+    await test('Concurrency: 8 powershell processes posting at once get 8 unique, contiguous MSG numbers', async () => {
+      const mb = path.join(TMP, 'race_tel', 'MAILBOX.md');
+      fs.mkdirSync(path.dirname(mb), { recursive: true });
+      fs.writeFileSync(mb, '# Tel\n\n## [MSG-001] H -> C | 2026-11-20 | OPEN\nkickoff\n');
+      const parties = ['C', 'X', 'A', 'H', 'C', 'X', 'A', 'H'];
+      const results = await Promise.all(parties.map((as, i) => postProcess([
+        '-As', as, '-To', 'Claude', '-Body', `race ${i}`, '-Mailbox', mb,
+        '-MutexName', 'Global\\MstTestRaceTel', '-Format', 'tel', '-Project', 'tel', '-Status', 'ACK',
+        '-HttpPort', '9', '-AuthToken', TOKEN
+      ])));
+      for (const r of results) assert.strictEqual(r.code, 0, r.out);
+      const posted = results.map(r => (r.out.match(/POSTED (MSG-\d+)/) || [])[1]);
+      assertUniqueContiguous(posted, 2, 9);
+      assertUniqueContiguous(telIds(mb), 1, 9);
+    });
+
+    await test('Concurrency: two MailboxDomainService instances (MCP / broker path) never reuse a number', async () => {
+      const MailboxDomainService = require('../src/domain/MailboxDomainService');
+      const mb = path.join(TMP, 'race_svc', 'MAILBOX.md');
+      fs.mkdirSync(path.dirname(mb), { recursive: true });
+      fs.writeFileSync(mb, '# Tel\n\n## [MSG-001] H -> C | 2026-11-20 | OPEN\nkickoff\n');
+      const opts = { mailboxPath: mb, headerFormat: 'tel', mutexName: 'Global\\MstTestRaceSvc', projectId: 'tel', httpPort: 9 };
+      const codexSide = new MailboxDomainService(opts);
+      const agSide = new MailboxDomainService(opts);
+      const jobs = [];
+      for (let i = 0; i < 3; i++) {
+        jobs.push(codexSide.postMessage({ as: 'X', to: 'Claude', body: `codex ${i}`, status: 'ACK' }));
+        jobs.push(agSide.postMessage({ as: 'A', to: 'Claude', body: `ag ${i}`, status: 'ACK' }));
+      }
+      const results = await Promise.all(jobs);
+      assertUniqueContiguous(results.map(r => r.messageId), 2, 7);
+      assertUniqueContiguous(telIds(mb), 1, 7);
+    });
+
+    await test('A mutex abandoned by a crashed writer does not block or fail the next post', async () => {
+      const mb = path.join(TMP, 'abandoned', 'MAILBOX.md');
+      fs.mkdirSync(path.dirname(mb), { recursive: true });
+      fs.writeFileSync(mb, '# Tel\n');
+      const mutexName = 'Global\\MstTestAbandoned';
+      // Takes the mutex and exits without releasing it, as a killed process would
+      await new Promise((resolve) => {
+        const p = spawn('powershell.exe', ['-NoProfile', '-Command',
+          `$m = New-Object System.Threading.Mutex($false, '${mutexName}'); [void]$m.WaitOne(); exit 0`], { shell: false });
+        p.on('close', resolve);
+      });
+      const r = await postProcess(['-As', 'C', '-To', 'Codex', '-Body', 'after crash', '-Mailbox', mb,
+        '-MutexName', mutexName, '-Format', 'tel', '-HttpPort', '9', '-AuthToken', TOKEN]);
+      assert.strictEqual(r.code, 0, r.out);
+      assert.match(r.out, /POSTED MSG-001/);
+    });
   }
+
+  await test('Watcher reports a duplicate heading id once (hand-edited mailbox) and ignores old ones at start-up', async () => {
+    const MailboxWatcher = require('../src/broker/MailboxWatcher');
+    const mb = path.join(TMP, 'dup_tel', 'MAILBOX.md');
+    fs.mkdirSync(path.dirname(mb), { recursive: true });
+    fs.writeFileSync(mb, '# Tel\n\n## [MSG-001] C -> A | 2026-11-20 | OPEN\na\n\n## [MSG-001] A -> C | 2026-11-20 | REVIEW\nold dup\n');
+    const w = new MailboxWatcher({ mailboxPath: mb, headerFormat: 'tel', projectId: 'tel' });
+    const dups = [];
+    w.on('duplicate_id', d => dups.push(d));
+    await w.initBaseline();
+    fs.appendFileSync(mb, '\n## [MSG-002] X -> C | 2026-11-20 23:38 | ACK\nx\n\n## [MSG-002] A -> C | 2026-11-20 23:38 | ACK\nhand-written\n');
+    await w.checkNow();
+    await w.checkNow();
+    assert.strictEqual(dups.length, 1, JSON.stringify(dups));
+    assert.strictEqual(dups[0].messageId, 'MSG-002');
+    assert.strictEqual(dups[0].project, 'tel');
+    assert.match(dups[0].headerLine, /A -> C/);
+    assert.match(dups[0].firstHeaderLine, /X -> C/);
+  });
+
+  await test('Onboarding / adapter post command names the project mailbox, mutex and format', () => {
+    const PromptGenerator = require('../src/broker/PromptGenerator');
+    const cmd = PromptGenerator.buildPostCommand({
+      partyCode: 'A', mailboxPath: TEL_MB, mutexName: 'Global\\MusicalTambolaMailbox', headerFormat: 'tel', projectId: 'musical-tambola'
+    });
+    assert.ok(cmd.includes(`-Mailbox "${TEL_MB}"`), cmd);
+    assert.ok(cmd.includes("-MutexName 'Global\\MusicalTambolaMailbox'"), cmd);
+    assert.ok(cmd.includes('-Format tel') && cmd.includes('-Project musical-tambola') && cmd.includes('-Status'), cmd);
+    const prompt = PromptGenerator.generate({ id: 'Antigravity', partyCode: 'A' }, {
+      mailbox: { path: TEL_MB, mutexName: 'Global\\MusicalTambolaMailbox', headerFormat: 'tel', projectId: 'musical-tambola' }
+    });
+    assert.ok(prompt.includes('## [MSG-<Number>] A ->'), 'tel heading example');
+    assert.ok(prompt.includes('project: "musical-tambola"'), 'send_message project hint');
+    assert.ok(prompt.includes(cmd), 'exact command embedded');
+  });
 
   // ─── 3. Broker isolation ─────────────────────────────────────
   const broker = new EventBroker({

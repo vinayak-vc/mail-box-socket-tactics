@@ -4,7 +4,29 @@
  * for newly registered AI coding agents.
  */
 
+const path = require('path');
+
+const POST_SCRIPT = path.resolve(__dirname, '../../scripts/MailboxPostSocket.ps1');
+const DEFAULT_MUTEX = 'Global\\OneBossFightMailbox';
+
 class PromptGenerator {
+  /**
+   * Builds the exact MailboxPostSocket.ps1 command for a project. Without -Mailbox/-MutexName/-Format
+   * the script falls back to the OneBossFight mailbox, so every project-specific value is spelled out.
+   */
+  static buildPostCommand({ partyCode = '<C|X|A|H>', mailboxPath = null, mutexName = null, headerFormat = 'broker', projectId = null } = {}) {
+    const parts = [
+      'powershell -NoProfile -ExecutionPolicy Bypass -File', `"${POST_SCRIPT}"`,
+      '-As', partyCode, '-To <Recipient>', '-BodyFile <path\\to\\message.txt>'
+    ];
+    if (mailboxPath) parts.push('-Mailbox', `"${mailboxPath}"`);
+    if (mutexName && mutexName !== DEFAULT_MUTEX) parts.push('-MutexName', `'${mutexName}'`);
+    if (headerFormat && headerFormat !== 'broker') parts.push('-Format', headerFormat);
+    if (projectId) parts.push('-Project', projectId);
+    if (headerFormat === 'tel') parts.push('-Status <OPEN|ACK|IN_PROGRESS|DONE|BLOCKED|REVIEW>');
+    return parts.join(' ');
+  }
+
   static generate(agentConfig, systemConfig = {}) {
     const agentId = agentConfig.id || 'NewAgent';
     const displayName = agentConfig.displayName || agentId;
@@ -13,7 +35,13 @@ class PromptGenerator {
     const capabilities = Array.isArray(agentConfig.capabilities) ? agentConfig.capabilities.join(', ') : 'Software Engineering';
 
     const mailboxPath = (systemConfig.mailbox && systemConfig.mailbox.path) || 'C:\\UnrealProject\\OneBossFight\\Documentation\\TEAM_MAILBOX.md';
-    const mutexName = (systemConfig.mailbox && systemConfig.mailbox.mutexName) || 'Global\\OneBossFightMailbox';
+    const mutexName = (systemConfig.mailbox && systemConfig.mailbox.mutexName) || DEFAULT_MUTEX;
+    const headerFormat = (systemConfig.mailbox && systemConfig.mailbox.headerFormat) || 'broker';
+    const projectId = (systemConfig.mailbox && systemConfig.mailbox.projectId) || null;
+    const headingExample = headerFormat === 'tel'
+      ? `## [MSG-<Number>] ${partyCode} -> <Recipient code> | <YYYY-MM-DD HH:mm> | <STATUS>`
+      : `### [${partyCode}-<Number>] ${displayName} -> <Recipient>, <YYYY-MM-DD HH:mm>`;
+    const postCommand = PromptGenerator.buildPostCommand({ partyCode, mailboxPath, mutexName, headerFormat, projectId });
 
     return `# TEAM ONBOARDING INSTRUCTIONS FOR ${displayName.toUpperCase()} (${agentId})
 
@@ -40,7 +68,7 @@ All team coordination is recorded in the authoritative on-disk markdown mailbox:
 ### Message Heading Format
 Every message in the mailbox strictly follows this format:
 \`\`\`markdown
-### [${partyCode}-<Number>] ${displayName} -> <Recipient>, <YYYY-MM-DD HH:mm>
+${headingExample}
 TASK: <Short summary of the task or objective>
 STATUS: <IN_PROGRESS | COMPLETED | BLOCKED | REVIEW_REQUESTED>
 FINDINGS: <Key technical discoveries, analysis, or benchmark results>
@@ -52,11 +80,11 @@ VALIDATION: <Commands executed and deterministic verification results>
 ### Writing Rules
 1. **Never edit past messages:** The mailbox is strictly an append-only audit trail.
 2. **Mutex Concurrency Protection:** All writes to the mailbox must be serialized under the Windows Mutex \`${mutexName}\`.
-3. **Use the Helper Script:** When posting messages, always use the project's helper script:
+3. **Use the MailSocket \`send_message\` tool${projectId ? ` (with \`project: "${projectId}"\`)` : ''}, or the helper script.** Never write a heading by hand: the number is allocated under the mutex, and a hand-written heading can duplicate one, which the broker then never dispatches.
    \`\`\`powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File C:\\UnrealProject\\MailBoxSocketTactics\\scripts\\MailboxPostSocket.ps1 -As ${partyCode} -To <Recipient> -BodyFile <path\\to\\message.txt>
+   ${postCommand}
    \`\`\`
-   This automatically acquires the mutex, increments your message sequence number, appends to the markdown file, and emits an instant sub-15ms WebSocket event.
+   This automatically acquires the mutex, picks the next message number, appends to the markdown file, and emits an instant sub-15ms WebSocket event.
 
 ---
 

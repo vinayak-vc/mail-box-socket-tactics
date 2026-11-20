@@ -161,6 +161,8 @@ Message ids are only unique within a project (`C-1` can exist in both). Always p
 
 **Header formats.** `broker` (default) is `### [C-12] Claude -> Codex, 2026-11-20 10:00`. `tel` is `## [MSG-012] C -> A | 2026-11-20 14:45 | OPEN`. `send_message` writes local date and time (`yyyy-MM-dd HH:mm`); older date-only headers and ISO timestamps (`2026-11-20T14:45:12+05:30`) also parse. Tel numbering is global, and the STATUS column is set with `send_message`'s `status`. The format is per project (`projects.<id>.mailbox.headerFormat`).
 
+**Never write a heading by hand.** `send_message`, the broker's `/api/mailbox/post` and `MailboxPostSocket.ps1` all hold the project's mutex from reading the highest number until the append is on disk, so they cannot collide. A hand-written heading skips the mutex and can reuse a number. The broker never dispatches the second copy and logs a `DUPLICATE_MESSAGE_ID` warning in the activity log. An agent without the MCP server must call the script with the project's values: `-Mailbox <path> -MutexName <mutex> -Format tel -Project <id>`.
+
 Recommended Claude Desktop entry (one server, OneBossFight default, Tambola reachable with `project`):
 
 ```json

@@ -25,6 +25,7 @@ class BaseAgentAdapter {
     // Multi-project broker: the project this adapter serves (null = legacy, accept any) and its heading format
     this.projectId = options.projectId || null;
     this.headerFormat = options.headerFormat || 'broker';
+    this.mutexName = options.mutexName || null; // Mailbox mutex, used only to tell the agent the exact post command
     this.workingDir = options.workingDir || process.cwd();
     this.reconnectIntervalMs = options.reconnectIntervalMs || 3000;
     this.maxReconnectIntervalMs = options.maxReconnectIntervalMs || 30000;

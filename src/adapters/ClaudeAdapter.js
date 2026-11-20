@@ -8,6 +8,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const BaseAgentAdapter = require('./BaseAgentAdapter');
+const PromptGenerator = require('../broker/PromptGenerator');
 
 class ClaudeAdapter extends BaseAgentAdapter {
   constructor(options = {}) {
@@ -42,7 +43,16 @@ class ClaudeAdapter extends BaseAgentAdapter {
     const prompt = `New Mailbox Task from ${message.sender} (${message.id}):\n\n` +
       `Header: ${message.headerLine}\n\n` +
       `Content:\n${message.body}\n\n` +
-      `Please review the work or request, execute required changes or verification, and post your response to the mailbox using MailboxPostSocket.ps1.`;
+      `Please review the work or request, execute required changes or verification, and post your response to the mailbox ` +
+      `with the MailSocket send_message tool${this.projectId ? ` (project "${this.projectId}")` : ''} or this exact command ` +
+      `(never write the heading by hand; the script numbers the message under the mailbox mutex):\n` +
+      PromptGenerator.buildPostCommand({
+        partyCode: 'C',
+        mailboxPath: this.mailboxPath,
+        mutexName: this.mutexName,
+        headerFormat: this.headerFormat,
+        projectId: this.projectId
+      });
 
     const args = [];
     if (this.sessionMode === 'continue') {

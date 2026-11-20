@@ -186,7 +186,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\test_powershell_integr
 - **Shared MCP Suite (`tests/test_mcp_suite.js`):** 15/15 Passed
 - **Hardening Suite (`tests/test_hardening_suite.js`):** 15/15 Passed
 - **Email Service Suite (`tests/test_email_service.js`):** 5/5 Passed
-- **Multi-Project Suite (`tests/test_projects_suite.js`, `npm run test:projects`):** 27/27 Passed. Covers config loading (legacy + multi), the tel header format (date-only, date+time and ISO timestamps; the post script writes local time), per-project isolation (HTTP, WebSocket, board, logs), concurrent sessions of one agent, and the MCP `project` argument.
+- **Multi-Project Suite (`tests/test_projects_suite.js`, `npm run test:projects`):** 32/32 Passed. Covers config loading (legacy + multi), the tel header format (date-only, date+time and ISO timestamps; the post script writes local time), per-project isolation (HTTP, WebSocket, board, logs), concurrent sessions of one agent, concurrent posters (8 processes, unique MSG numbers; an abandoned mutex), duplicate-id warnings, and the MCP `project` argument.
 - **PowerShell Integration Suite (`tests/test_powershell_integration.ps1`):** 5/5 Passed
 
 ---

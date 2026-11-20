@@ -204,6 +204,19 @@ class EventBroker {
         this.publishMessage(msg, ctx);
       });
 
+      // Usually a hand-edited mailbox: the duplicate heading is not dispatched to anyone
+      ctx.watcher.on('duplicate_id', (dup) => {
+        console.warn(`[EventBroker] [${def.id}] Duplicate message id ${dup.messageId}: "${dup.headerLine}" (not dispatched)`);
+        this.logger.log({
+          level: 'WARN',
+          type: 'DUPLICATE_MESSAGE_ID',
+          project: def.id,
+          messageId: dup.messageId,
+          details: { headerLine: dup.headerLine, firstHeaderLine: dup.firstHeaderLine },
+          summary: `Duplicate id ${dup.messageId} in mailbox (likely hand-written, not via send_message); second copy was not dispatched`
+        });
+      });
+
       ctx.watcher.on('error', (err) => {
         this.lastError = `[${def.id}] ${err.message}`;
         console.error(`[EventBroker] MailboxWatcher error (${def.id}): ${err.message}`);
@@ -1560,7 +1573,12 @@ class EventBroker {
     if (req.method === 'POST' && url.pathname === '/api/prompt/generate') {
       readJsonBody().then((agentConfig) => {
         const prompt = PromptGenerator.generate(agentConfig, {
-          mailbox: ctx.def.mailboxPath ? { path: ctx.def.mailboxPath, mutexName: ctx.def.mutexName } : null
+          mailbox: ctx.def.mailboxPath ? {
+            path: ctx.def.mailboxPath,
+            mutexName: ctx.def.mutexName,
+            headerFormat: ctx.def.headerFormat,
+            projectId: ctx.id
+          } : null
         });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });

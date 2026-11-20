@@ -79,10 +79,24 @@ function ConvertTo-PartyCodes([string]$recipients) {
 }
 
 try {
-    $got = $mutex.WaitOne(15000)
+    # The mutex is held from reading the current max number until the append is flushed,
+    # so two posters can never pick the same number.
+    try {
+        $got = $mutex.WaitOne(15000)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        # A previous holder died without releasing. Windows hands ownership to us, so carry on.
+        $got = $true
+    }
     if (-not $got) { Write-Output 'MailboxPostSocket: could not get the mailbox lock in 15 s'; exit 1 }
 
-    $text = if (Test-Path $Mailbox) { [System.IO.File]::ReadAllText($Mailbox) } else { '' }
+    # Read with FileShare.ReadWrite so an editor or watcher that has the file open does not fail the post
+    $text = ''
+    if (Test-Path $Mailbox) {
+        $rs = [System.IO.File]::Open($Mailbox, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try { $text = (New-Object System.IO.StreamReader($rs, [System.Text.Encoding]::UTF8)).ReadToEnd() }
+        finally { $rs.Dispose() }
+    }
     $max = 0
     $body = ($Body -replace "`r?`n", "`r`n")
     if ($Format -eq 'tel') {
@@ -116,6 +130,11 @@ try {
         $stream.Flush()
     }
     finally { $stream.Dispose() }
+
+    # The append is on disk: release the lock now. The broker notification below is a network call
+    # (up to 2 s when the broker is down) and must not keep other posters waiting.
+    $mutex.ReleaseMutex()
+    $got = $false
 
     Write-Output ("POSTED {0}" -f $id)
 

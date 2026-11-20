@@ -257,7 +257,8 @@ async function main() {
         authToken: config.broker.authToken,
         mailboxPath: config.mailbox.path,
         projectId: config.mailbox.projectId,
-        headerFormat: config.mailbox.headerFormat
+        headerFormat: config.mailbox.headerFormat,
+        mutexName: config.mailbox.mutexName
       });
       claude.start();
       adapters.push(claude);
@@ -272,7 +273,8 @@ async function main() {
         authToken: config.broker.authToken,
         mailboxPath: config.mailbox.path,
         projectId: config.mailbox.projectId,
-        headerFormat: config.mailbox.headerFormat
+        headerFormat: config.mailbox.headerFormat,
+        mutexName: config.mailbox.mutexName
       });
       codex.start();
       adapters.push(codex);
@@ -287,7 +289,8 @@ async function main() {
         authToken: config.broker.authToken,
         mailboxPath: config.mailbox.path,
         projectId: config.mailbox.projectId,
-        headerFormat: config.mailbox.headerFormat
+        headerFormat: config.mailbox.headerFormat,
+        mutexName: config.mailbox.mutexName
       });
       antigravity.start();
       adapters.push(antigravity);
