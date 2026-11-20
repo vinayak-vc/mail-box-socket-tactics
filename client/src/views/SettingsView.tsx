@@ -159,11 +159,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ snapshot }) => {
             </div>
             <div>
               <span style={{ color: 'var(--text-muted)' }}>Windows Mutex Name: </span>
-              <strong className="mono-cell">Global\OneBossFightMailbox</strong>
+              <strong className="mono-cell">{snapshot.mailbox.mutexName || 'Global\\OneBossFightMailbox'}</strong>
             </div>
             <div>
-              <span style={{ color: 'var(--text-muted)' }}>StateStore Path: </span>
-              <strong className="mono-cell">data/mailbox_state.json (Atomic replace)</strong>
+              <span style={{ color: 'var(--text-muted)' }}>Header Format: </span>
+              <strong className="mono-cell">{snapshot.mailbox.headerFormat || 'broker'}</strong>
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>StateStore: </span>
+              <strong className="mono-cell">per project (atomic replace)</strong>
             </div>
             <div>
               <span style={{ color: 'var(--text-muted)' }}>Agent Registry Path: </span>

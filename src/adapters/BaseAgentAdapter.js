@@ -22,6 +22,9 @@ class BaseAgentAdapter {
     this.brokerUrl = options.brokerUrl || 'ws://127.0.0.1:8765';
     this.authToken = options.authToken || 'mailbox-socket-secret-token';
     this.mailboxPath = options.mailboxPath || path.resolve(__dirname, '../../Documentation/TEAM_MAILBOX.md');
+    // Multi-project broker: the project this adapter serves (null = legacy, accept any) and its heading format
+    this.projectId = options.projectId || null;
+    this.headerFormat = options.headerFormat || 'broker';
     this.workingDir = options.workingDir || process.cwd();
     this.reconnectIntervalMs = options.reconnectIntervalMs || 3000;
     this.maxReconnectIntervalMs = options.maxReconnectIntervalMs || 30000;
@@ -120,7 +123,9 @@ class BaseAgentAdapter {
           type: EVENT_TYPES.AUTH_REQUEST,
           agentId: this.agentId,
           token: this.authToken,
-          workerId: this.workerId
+          workerId: this.workerId,
+          instanceId: this.workerId,
+          ...(this.projectId ? { projects: [this.projectId] } : {})
         }));
       });
 
@@ -228,6 +233,11 @@ class BaseAgentAdapter {
     const messageId = notify.messageId;
     if (!messageId) return;
 
+    // Ignore notifications from other projects (their ids live in a different mailbox)
+    if (this.projectId && notify.project && notify.project !== this.projectId) {
+      return;
+    }
+
     // Validate recipient
     if (!isRecipientMatch(this.agentId, notify.recipientRaw)) {
       return; // Not for this agent
@@ -314,6 +324,7 @@ class BaseAgentAdapter {
         this.ws.send(JSON.stringify({
           type: EVENT_TYPES.LEASE_RENEW,
           messageId,
+          ...(this.projectId ? { project: this.projectId } : {}),
           workerId: this.workerId,
           extendMs: this.leaseTimeoutMs
         }));
@@ -342,7 +353,7 @@ class BaseAgentAdapter {
   async retrieveAuthoritativeMessage(messageId) {
     if (!fs.existsSync(this.mailboxPath)) return null;
     const text = await fs.promises.readFile(this.mailboxPath, 'utf8');
-    const messages = parseMailboxMessages(text);
+    const messages = parseMailboxMessages(text, { format: this.headerFormat });
     return messages.find(m => m.id === messageId) || null;
   }
 
@@ -353,7 +364,7 @@ class BaseAgentAdapter {
     try {
       if (!fs.existsSync(this.mailboxPath)) return;
       const text = await fs.promises.readFile(this.mailboxPath, 'utf8');
-      const messages = parseMailboxMessages(text);
+      const messages = parseMailboxMessages(text, { format: this.headerFormat });
 
       // First ever run with durable state: treat existing history as already handled.
       // Otherwise every restart would re-run the whole mailbox through the headless CLI.
@@ -377,6 +388,7 @@ class BaseAgentAdapter {
             recipientRaw: msg.recipientRaw,
             timestamp: msg.timestamp,
             mailboxPath: this.mailboxPath,
+            project: this.projectId,
             isCatchup: true
           });
         }
@@ -395,6 +407,7 @@ class BaseAgentAdapter {
         this.ws.send(JSON.stringify({
           type: EVENT_TYPES.MESSAGE_ACK,
           messageId,
+          ...(this.projectId ? { project: this.projectId } : {}),
           agentId: this.agentId,
           workerId: this.workerId,
           status,

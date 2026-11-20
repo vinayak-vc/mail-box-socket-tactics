@@ -37,6 +37,16 @@ const PROCESSING_STATUS = {
 // Matches: ### [A-170] Antigravity -> Claude,Codex,Owner, 2026-10-28 16:01
 const HEADING_REGEX = /^[ \t]*###[ \t]+\[(?<party>[A-Z]+)-(?<number>\d+)\][ \t]+(?<sender>[^-\r\n>]+?)[ \t]*->[ \t]*(?<recipient>.+?)(?:,[ \t]*(?<timestamp>\d{4}-\d{2}-\d{2}[^\r\n]*))?$/gm;
 
+// "tel" heading format (used by the Media Tambola Tel_Mailbox):
+// Matches: ## [MSG-001] C -> A | 2026-11-20 | OPEN
+// Matches: ## [MSG-012] A -> C, X | 2026-11-21 14:05 | REVIEW
+// Message ids are global ("MSG-###"), the party is derived from the sender, and the
+// trailing STATUS column is exposed as `status`. Exactly two '#' (### sub-headings are body text).
+const TEL_HEADING_REGEX = /^[ \t]*##[ \t]+\[(?<prefix>[A-Z]+)-(?<number>\d+)\][ \t]+(?<sender>[^-\r\n>|]+?)[ \t]*->[ \t]*(?<recipient>[^|\r\n]+?)(?:[ \t]*\|[ \t]*(?<timestamp>[^|\r\n]*?))?(?:[ \t]*\|[ \t]*(?<status>[^|\r\n]*?))?[ \t]*$/gm;
+
+/** Supported per-project mailbox heading formats */
+const HEADER_FORMATS = ['broker', 'tel'];
+
 /**
  * Checks if a recipient string includes a specific agent ID.
  * Parses multi-recipient strings split by comma, ampersand, slash, or "and".
@@ -113,15 +123,32 @@ function getPartyCode(agentId) {
 }
 
 /**
- * Parses full mailbox markdown text into structured message records.
- * Identifies both valid and malformed headings.
+ * Extracts heading matches for one header format.
  */
-function parseMailboxMessages(text) {
-  if (!text || typeof text !== 'string') return [];
+function matchHeadings(text, format) {
   const matches = [];
   let match;
-  const regex = new RegExp(HEADING_REGEX.source, 'gm');
 
+  if (format === 'tel') {
+    const regex = new RegExp(TEL_HEADING_REGEX.source, 'gm');
+    while ((match = regex.exec(text)) !== null) {
+      const sender = match.groups.sender.trim();
+      matches.push({
+        party: getPartyCode(sender) || sender.charAt(0).toUpperCase(),
+        number: parseInt(match.groups.number, 10),
+        id: `${match.groups.prefix}-${match.groups.number}`,
+        sender,
+        recipientRaw: match.groups.recipient.trim(),
+        timestamp: match.groups.timestamp ? match.groups.timestamp.trim() : '',
+        status: match.groups.status ? match.groups.status.trim() : '',
+        index: match.index,
+        headerLine: match[0].trim()
+      });
+    }
+    return matches;
+  }
+
+  const regex = new RegExp(HEADING_REGEX.source, 'gm');
   while ((match = regex.exec(text)) !== null) {
     matches.push({
       party: match.groups.party,
@@ -134,6 +161,19 @@ function parseMailboxMessages(text) {
       headerLine: match[0].trim()
     });
   }
+  return matches;
+}
+
+/**
+ * Parses full mailbox markdown text into structured message records.
+ * Identifies both valid and malformed headings.
+ * @param {string} text - mailbox markdown
+ * @param {object} [options] - { format: 'broker' (default) | 'tel' }
+ */
+function parseMailboxMessages(text, options = {}) {
+  if (!text || typeof text !== 'string') return [];
+  const format = HEADER_FORMATS.includes(options.format) ? options.format : 'broker';
+  const matches = matchHeadings(text, format);
 
   const messages = [];
   for (let i = 0; i < matches.length; i++) {
@@ -162,6 +202,8 @@ module.exports = {
   EVENT_TYPES,
   PROCESSING_STATUS,
   HEADING_REGEX,
+  TEL_HEADING_REGEX,
+  HEADER_FORMATS,
   isRecipientMatch,
   normalizeAgentId,
   getPartyCode,

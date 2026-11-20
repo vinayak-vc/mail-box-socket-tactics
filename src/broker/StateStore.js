@@ -12,6 +12,7 @@ class StateStore {
   constructor(options = {}) {
     this.statePath = options.statePath || path.resolve(__dirname, '../../data/mailbox_state.json');
     this.maxRetries = options.maxRetries !== undefined ? options.maxRetries : 3;
+    this.projectId = options.projectId || null; // Project these tasks belong to; tagged onto every record
     this.tasks = new Map(); // messageId -> TaskState
     this.deadLetters = new Map(); // messageId -> DeadLetterRecord
 
@@ -37,11 +38,13 @@ class StateStore {
 
       if (data.tasks) {
         for (const [id, t] of Object.entries(data.tasks)) {
+          if (this.projectId && !t.project) t.project = this.projectId;
           this.tasks.set(id, t);
         }
       }
       if (data.deadLetters) {
         for (const [id, dl] of Object.entries(data.deadLetters)) {
+          if (this.projectId && !dl.project) dl.project = this.projectId;
           this.deadLetters.set(id, dl);
         }
       }
@@ -93,6 +96,7 @@ class StateStore {
     if (!this.tasks.has(id)) {
       const task = {
         messageId: id,
+        project: this.projectId || msg.project || null,
         sender: msg.sender || '',
         recipient: msg.recipientRaw || msg.recipient || '',
         status: PROCESSING_STATUS.PENDING,
@@ -224,6 +228,7 @@ class StateStore {
       t.status = PROCESSING_STATUS.DEAD_LETTER;
       this.deadLetters.set(messageId, {
         messageId,
+        project: t.project || this.projectId || null,
         sender: t.sender,
         recipient: t.recipient,
         attempts: t.attemptCount,
@@ -268,6 +273,7 @@ class StateStore {
             t.status = PROCESSING_STATUS.DEAD_LETTER;
             this.deadLetters.set(id, {
               messageId: id,
+              project: t.project || this.projectId || null,
               attempts: t.attemptCount,
               lastError: 'Crashed/abandoned lease expired on restart',
               quarantinedAt: new Date().toISOString()

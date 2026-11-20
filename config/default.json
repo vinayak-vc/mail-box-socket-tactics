@@ -10,10 +10,29 @@
     "maxRetries": 3,
     "backoffInitialMs": 2000
   },
-  "mailbox": {
-    "path": "C:\\UnrealProject\\OneBossFight\\Documentation\\TEAM_MAILBOX.md",
-    "fallbackPath": "C:\\UnrealProject\\MailBoxSocketTactics\\Documentation\\TEAM_MAILBOX.md",
-    "mutexName": "Global\\OneBossFightMailbox"
+  "defaultProject": "onebossfight",
+  "projects": {
+    "onebossfight": {
+      "name": "OneBossFight",
+      "mailbox": {
+        "path": "C:\\UnrealProject\\OneBossFight\\Documentation\\TEAM_MAILBOX.md",
+        "fallbackPath": "C:\\UnrealProject\\MailBoxSocketTactics\\Documentation\\TEAM_MAILBOX.md",
+        "mutexName": "Global\\OneBossFightMailbox",
+        "headerFormat": "broker"
+      },
+      "statePath": "data/mailbox_state.json",
+      "boardPath": "data/board.json"
+    },
+    "musical-tambola": {
+      "name": "Media Tambola",
+      "mailbox": {
+        "path": "C:\\React\\musical-tambola\\docs\\Tel_Mailbox\\MAILBOX.md",
+        "mutexName": "Global\\MusicalTambolaMailbox",
+        "headerFormat": "tel"
+      },
+      "docsDir": "C:\\React\\musical-tambola\\docs",
+      "workingDir": "C:\\React\\musical-tambola"
+    }
   },
   "zrok": {
     "enabled": true,

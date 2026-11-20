@@ -13,7 +13,7 @@ import { AddAgentWizard } from './views/AddAgentWizard';
 import { SettingsView } from './views/SettingsView';
 import { KanbanBoardView } from './views/KanbanBoardView';
 import { SystemSnapshot } from './types';
-import { client, promptNewAuthToken } from './api';
+import { client, promptNewAuthToken, getProject, setProject, onProjectChange } from './api';
 
 export const App: React.FC = () => {
   const getInitialTab = (): NavTab => {
@@ -32,6 +32,13 @@ export const App: React.FC = () => {
   const [snapshot, setSnapshot] = useState<SystemSnapshot | null>(null);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // Selected project ('' = broker default); persisted in localStorage by api.ts
+  const [project, setProjectState] = useState<string>(getProject);
+
+  const handleProjectChange = useCallback((projectId: string) => {
+    setSnapshot(null); // never show one project's data under another project's name
+    setProject(projectId);
+  }, []);
 
   const refreshSnapshot = useCallback(async () => {
     try {
@@ -64,11 +71,20 @@ export const App: React.FC = () => {
     // Gentle fallback refresh every 10 seconds
     const interval = setInterval(refreshSnapshot, 10000);
 
+    // Project switch: re-fetch everything for the new project
+    const offProject = onProjectChange((projectId) => {
+      setProjectState(projectId);
+      refreshSnapshot();
+    });
+
     return () => {
       unsubscribe();
+      offProject();
       clearInterval(interval);
     };
   }, [refreshSnapshot]);
+
+  const activeProjectId = project || snapshot?.project?.id || snapshot?.defaultProject || '';
 
   const renderActiveView = () => {
     switch (activeTab) {
@@ -103,7 +119,13 @@ export const App: React.FC = () => {
     <div className="app-container">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} snapshot={snapshot} />
       <div className="main-wrapper">
-        <TopNav snapshot={snapshot} wsConnected={wsConnected} onRefresh={refreshSnapshot} />
+        <TopNav
+          snapshot={snapshot}
+          wsConnected={wsConnected}
+          onRefresh={refreshSnapshot}
+          activeProjectId={activeProjectId}
+          onProjectChange={handleProjectChange}
+        />
         {error && !snapshot && (
           <div style={{ padding: '12px 24px', background: 'var(--color-danger-bg)', color: 'var(--color-danger)', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
             <span>Connection error: {error}.</span>
@@ -116,7 +138,10 @@ export const App: React.FC = () => {
             </button>
           </div>
         )}
-        {renderActiveView()}
+        {/* key remounts views that fetch their own data (Progress, Board) on project switch */}
+        <React.Fragment key={activeProjectId || 'default'}>
+          {renderActiveView()}
+        </React.Fragment>
       </div>
     </div>
   );

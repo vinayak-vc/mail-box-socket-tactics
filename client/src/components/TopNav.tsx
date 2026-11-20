@@ -1,16 +1,31 @@
-import React, { useState } from 'react';
-import { Radio, Clock, Globe, Mail, Send, X, AlertCircle, CheckCircle, Key } from 'lucide-react';
-import { SystemSnapshot } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Radio, Clock, Globe, Mail, Send, X, AlertCircle, CheckCircle, Key, FolderKanban } from 'lucide-react';
+import { SystemSnapshot, ProjectSummary } from '../types';
 import { client, promptNewAuthToken } from '../api';
 
 interface TopNavProps {
   snapshot: SystemSnapshot | null;
   wsConnected: boolean;
   onRefresh: () => void;
+  /** Currently selected project id */
+  activeProjectId?: string;
+  /** Called when the operator picks another project */
+  onProjectChange?: (projectId: string) => void;
 }
 
-export const TopNav: React.FC<TopNavProps> = ({ snapshot, wsConnected, onRefresh }) => {
+export const TopNav: React.FC<TopNavProps> = ({ snapshot, wsConnected, onRefresh, activeProjectId, onProjectChange }) => {
   const isBrokerUp = snapshot?.broker.status === 'UP';
+
+  // Project list survives the brief null snapshot during a project switch
+  const [knownProjects, setKnownProjects] = useState<ProjectSummary[]>([]);
+  useEffect(() => {
+    if (snapshot?.projects && snapshot.projects.length > 0) setKnownProjects(snapshot.projects);
+  }, [snapshot]);
+  useEffect(() => {
+    // Initial load (snapshot may 404 if a remembered project was removed)
+    client.fetchProjects().then(r => setKnownProjects(r.projects)).catch(() => {});
+  }, []);
+  const activeProject = knownProjects.find(p => p.id === activeProjectId);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [subject, setSubject] = useState('');
@@ -76,6 +91,29 @@ export const TopNav: React.FC<TopNavProps> = ({ snapshot, wsConnected, onRefresh
             <Radio size={14} />
             <span>{wsConnected ? 'LIVE' : 'RECONNECTING'}</span>
           </div>
+
+          {knownProjects.length > 0 && (
+            <label
+              className="project-picker"
+              title={activeProject ? `${activeProject.mailboxPath || ''}${activeProject.exists ? '' : ' (mailbox missing)'}` : 'Project'}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <FolderKanban size={14} aria-hidden="true" />
+              <span className="sr-only" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>Project</span>
+              <select
+                className="select-filter"
+                aria-label="Project"
+                value={activeProjectId || ''}
+                onChange={(e) => onProjectChange && onProjectChange(e.target.value)}
+              >
+                {knownProjects.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{p.exists ? '' : ' (missing)'}{p.taskCounts && p.taskCounts.pending > 0 ? ` · ${p.taskCounts.pending} pending` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           {snapshot?.zrok?.status === 'CONNECTED' && (
             <div className="status-pill status-online" title="Reachable through the public tunnel (token required)">

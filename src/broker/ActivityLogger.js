@@ -70,6 +70,7 @@ class ActivityLogger {
       type: entry.type || 'SYSTEM',
       agentId: entry.agentId || null,
       messageId: entry.messageId || null,
+      project: entry.project || null, // null = global event (agent presence, server lifecycle)
       details: this.sanitize(entry.details || {}),
       summary: this.sanitize(entry.summary || '')
     };
@@ -108,6 +109,11 @@ class ActivityLogger {
       result = result.filter(e => e.messageId === filters.messageId);
     }
 
+    // Project filter keeps that project's events plus global (untagged) events
+    if (filters.project) {
+      result = result.filter(e => !e.project || e.project === filters.project);
+    }
+
     if (filters.sinceTimestamp) {
       const sinceTime = new Date(filters.sinceTimestamp).getTime();
       result = result.filter(e => new Date(e.timestamp).getTime() >= sinceTime);
@@ -122,7 +128,7 @@ class ActivityLogger {
 
   exportCSV(filters = {}) {
     const list = this.getEvents(filters);
-    const headers = ['id', 'timestamp', 'level', 'type', 'agentId', 'messageId', 'summary'];
+    const headers = ['id', 'timestamp', 'level', 'type', 'agentId', 'messageId', 'summary', 'project'];
     const rows = [headers.join(',')];
 
     for (const e of list) {
@@ -133,7 +139,8 @@ class ActivityLogger {
         `"${e.type}"`,
         `"${e.agentId || ''}"`,
         `"${e.messageId || ''}"`,
-        `"${(e.summary || '').replace(/"/g, '""')}"`
+        `"${(e.summary || '').replace(/"/g, '""')}"`,
+        `"${e.project || ''}"`
       ];
       rows.push(row.join(','));
     }

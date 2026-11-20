@@ -26,6 +26,45 @@ npm run dev
 ```
 Accessible at `http://127.0.0.1:5173/` (proxies `/api` and `/ws` to the local backend).
 
+### 1b. Multiple projects (one broker, one dashboard)
+
+One MailSocket install can watch several projects' mailboxes. Declare them in `config/default.json`:
+
+```json
+"defaultProject": "onebossfight",
+"projects": {
+  "onebossfight": {
+    "name": "OneBossFight",
+    "mailbox": { "path": "C:\\UnrealProject\\OneBossFight\\Documentation\\TEAM_MAILBOX.md",
+                 "fallbackPath": "C:\\UnrealProject\\MailBoxSocketTactics\\Documentation\\TEAM_MAILBOX.md",
+                 "mutexName": "Global\\OneBossFightMailbox", "headerFormat": "broker" },
+    "statePath": "data/mailbox_state.json",
+    "boardPath": "data/board.json"
+  },
+  "musical-tambola": {
+    "name": "Media Tambola",
+    "mailbox": { "path": "C:\\React\\musical-tambola\\docs\\Tel_Mailbox\\MAILBOX.md",
+                 "mutexName": "Global\\MusicalTambolaMailbox", "headerFormat": "tel" },
+    "docsDir": "C:\\React\\musical-tambola\\docs"
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| project id (key) | 1–64 chars: lowercase letters, digits, `-`, `_`. Used in `?project=` and the MCP `project` argument. |
+| `mailbox.path` / `fallbackPath` | Mailbox file. The broker never creates it. A missing mailbox is fatal only for the default project; other projects run without a watcher. |
+| `mailbox.mutexName` | Windows named mutex used by `MailboxPostSocket.ps1` when appending. Use a different one per project. |
+| `mailbox.headerFormat` | `broker` (`### [C-12] Claude -> Codex, date`) or `tel` (`## [MSG-012] C -> A \| yyyy-MM-dd HH:mm \| STATUS`; older date-only tel headers still parse). |
+| `statePath`, `boardPath` | Per-project task state and Kanban board. Defaults: `data/projects/<id>/mailbox_state.json` and `board.json`. OneBossFight keeps its original files. |
+| `docsDir` | Folder the Progress view reads (`TASKS.md`, …). Defaults to the mailbox's folder. |
+
+- **Backward compatible:** a config with only the old `"mailbox": {...}` block still works as one project with id `default` and the original data files. If `projects` is present, `mailbox` is ignored.
+- **HTTP API:** every data endpoint takes `?project=<id>` (POST bodies may also send `"project"`). Without it, the default project is used. `GET /api/projects` lists the projects, and an unknown id returns `404`.
+- **WebSocket:** `MAILBOX_MESSAGE_NOTIFY` carries `project` and `projectName`. `MESSAGE_ACK`, `LEASE_RENEW` and `REPLAY_REQUEST` accept `project`. A client may send `projects: ["id"]` in `AUTH_REQUEST` to receive only those projects' notifications (adapters do this automatically for the default project).
+- **Dashboard:** the project picker in the top bar switches every view. The browser remembers the choice (`localStorage` key `mst_project`).
+- **Env overrides (broker):** `MAILBOX_PROJECT` changes the default project, and `MAILBOX_PATH` overrides the default project's mailbox path.
+
 ---
 
 ## 2. Dashboard Features & Layout
@@ -35,7 +74,7 @@ The **MailSocketTactics Control Center** is a desktop-focused web application bu
 1. **Overview Dashboard:** Live summary cards (broker status, active/executing/idle agents, task queues, DLQ), service stack health, and real-time operational activity feed.
 2. **AI Agents:** Real-time agent status cards (`Connected`, `Idle`, `Working`, `Waiting`, `Degraded`, `Offline`, `Disabled`, `Paused`), active task execution tracking, task counters, pause/resume assignment toggles (without killing running work), and capability checks.
 3. **Task Queue:** Comprehensive task grid with status filters, detailed drawer inspection with **9-Step Lifecycle Stepper**, retry/requeue actions, and cancel controls.
-4. **Mailbox:** Direct live viewer of the authoritative `TEAM_MAILBOX.md` file, sender/recipient filtering, thread context, and atomic message composer protected under the named mutex `Global\OneBossFightMailbox`.
+4. **Mailbox:** Direct live viewer of the authoritative `TEAM_MAILBOX.md` file, sender/recipient filtering, thread context, and atomic message composer protected under the selected project's named mutex (e.g. `Global\OneBossFightMailbox`).
 5. **Message Logs:** Chronological operational dispatch log with automatic secret/token redaction, filters by level/type, and one-click JSON/CSV export.
 6. **Activity Timeline:** High-density event stream of connections, claims, leases, and transitions.
 7. **Add AI Agent Wizard:** 5-step guided wizard to onboard future AI coding agents:
@@ -51,7 +90,7 @@ The **MailSocketTactics Control Center** is a desktop-focused web application bu
 
 ## 3. Shared MCP Server Integration
 
-MailSocketTactics includes a single, reusable **Model Context Protocol (MCP)** server (`src/mcp/McpServer.js`) over `stdio` implementing JSON-RPC 2.0. It exposes 15 authorized mailbox and task tools, 3 protocol resources, and custom onboarding prompts to:
+MailSocketTactics includes a single, reusable **Model Context Protocol (MCP)** server (`src/mcp/McpServer.js`) over `stdio` implementing JSON-RPC 2.0. It exposes 22 authorized mailbox, task and board tools (all project-aware through an optional `project` argument, plus `list_projects`), 3 protocol resources, and custom onboarding prompts to:
 - **Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`)
 - **Codex Desktop** (`C:\Users\<User>\.codex\config.toml`)
 - **Google Antigravity Desktop** (`.gemini/antigravity/mcp/mailsocket/`)
@@ -143,10 +182,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\test_powershell_integr
 - **Broker / Adapter Suite (`tests/test_suite.js`):** 20/20 Passed
 - **Control Center Suite (`tests/test_dashboard_suite.js`):** 20/20 Passed
 - **Zrok Dual-Mode Suite (`tests/test_zrok_suite.js`):** 5/5 Passed
-- **Domain Services Suite (`tests/test_domain_suite.js`):** 12/12 Passed
-- **Shared MCP Suite (`tests/test_mcp_suite.js`):** 13/13 Passed
+- **Domain Services Suite (`tests/test_domain_suite.js`):** 13/13 Passed
+- **Shared MCP Suite (`tests/test_mcp_suite.js`):** 15/15 Passed
+- **Hardening Suite (`tests/test_hardening_suite.js`):** 15/15 Passed
+- **Email Service Suite (`tests/test_email_service.js`):** 5/5 Passed
+- **Multi-Project Suite (`tests/test_projects_suite.js`, `npm run test:projects`):** 27/27 Passed. Covers config loading (legacy + multi), the tel header format (date-only, date+time and ISO timestamps; the post script writes local time), per-project isolation (HTTP, WebSocket, board, logs), concurrent sessions of one agent, and the MCP `project` argument.
 - **PowerShell Integration Suite (`tests/test_powershell_integration.ps1`):** 5/5 Passed
-- **Total:** **75 / 75 deterministic tests passing.**
 
 ---
 

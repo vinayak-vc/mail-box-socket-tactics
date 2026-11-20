@@ -61,23 +61,26 @@ The bound identity cannot be overridden by tool parameters. For example:
 
 ---
 
-## 4. MCP Tools Reference (15 Tools)
+## 4. MCP Tools Reference
+
+Every mailbox, task and board tool also accepts an optional **`project`** argument (see [§6b](#6b-multi-project-one-mcp-server-several-mailboxes)). Without it, the tool works on the server's default project.
 
 | Tool Name | Parameters | Description |
 |---|---|---|
-| `get_team_status` | *(none)* | Returns operational status of the AI team, system health, task counts, and broker status. |
+| `list_projects` | *(none)* | Lists the configured projects (id, name, mailbox path, header format) and which one is this server's default. |
+| `get_team_status` | `project` (opt, or `all`) | Returns operational status of the AI team, system health, task counts, and broker status. |
 | `get_my_identity` | *(none)* | Returns verified agent ID, party code (`C`/`X`/`A`), role, and capabilities. |
-| `get_pending_messages` | `limit` (opt) | Retrieves unclaimed pending messages addressed to this agent from `TEAM_MAILBOX.md`. |
+| `get_pending_messages` | `limit` (opt), `project` (opt, or `all`) | Retrieves unclaimed pending messages addressed to this agent from `TEAM_MAILBOX.md`. |
 | `get_message` | `messageId` | Retrieves a specific message by ID (e.g. `X-1`, `C-2`). |
-| `wait_for_message` | `timeoutSeconds` (opt) | Bounded wait for incoming messages (1–120s). Returns message or timeout. |
+| `wait_for_message` | `timeoutSeconds` (opt), `project` (opt, or `all`) | Bounded wait for incoming messages (1–120s). Returns message or timeout. |
 | `claim_message` | `messageId`, `leaseMs` (opt) | Atomically claims an eligible message before execution. Prevents duplicate work. |
 | `acknowledge_message` | `messageId`, `status` (opt) | Records delivery acknowledgement (`CLAIMED` or `RUNNING`) without marking completed. |
-| `send_message` | `to`, `body` | Appends a message to `TEAM_MAILBOX.md` under mutex via `MailboxPostSocket.ps1`. |
+| `send_message` | `to`, `body`, `status` (opt, tel format only) | Appends a message to the project's mailbox under that project's mutex via `MailboxPostSocket.ps1`, in the project's header format. |
 | `update_task_status` | `messageId`, `status`, `details` (opt) | Updates task execution state (`RUNNING`, `FAILED`, etc.). |
 | `complete_task` | `messageId`, `evidence` (opt), `responseMessageId` (opt) | Atomically marks task completed with verifiable evidence. |
 | `fail_task` | `messageId`, `error`, `isPermanent` (opt) | Records failure, increments attempt counter, and evaluates retry eligibility. |
 | `get_task_history` | `messageId` | Returns the complete lifecycle event history and timestamps for a task. |
-| `get_message_history` | `limit` (opt) | Returns conversation history involving this agent. |
+| `get_message_history` | `limit` (opt), `project` (opt, or `all`) | Returns conversation history involving this agent. |
 | `get_agent_status` | `agentId` (opt) | Inspects the configuration and online status of any team member. |
 | `heartbeat` | *(none)* | Confirms active connectivity and timestamps agent activity. |
 | `send_owner_email` | `subject`, `message`, `urgency` (opt), `taskReference` (opt) | Sends an email notification directly to the Human Owner via Brevo transactional email. Use for urgent blockers, decisions needed, or critical milestones. |
@@ -139,6 +142,36 @@ MAILBOX_PATH = "C:/UnrealProject/Documentation/TEAM_MAILBOX.md"
 ### Google Antigravity Desktop
 Tool schemas located in:
 `C:\Users\Rushit Vaghela\.gemini\antigravity\mcp\mailsocket\`
+
+---
+
+## 6b. Multi-project: one MCP server, several mailboxes
+
+Projects are declared once in `config/default.json` (see README §1b). Each has its own mailbox, mutex, header format, task state and board. A single MCP server process can reach **all** of them:
+
+1. **Default project.** This is what tools use when `project` is omitted. It is chosen in this order:
+   1. `MAILBOX_PROJECT` env var (a project id, e.g. `musical-tambola`). Unknown ids stop the server at start-up.
+   2. `MAILBOX_PATH` env var. If it matches a configured project's mailbox (case-insensitive), that project is the default. Otherwise it becomes an ad-hoc project with id `default`, which is the old single-mailbox behaviour.
+   3. `defaultProject` in `config/default.json`.
+2. **Other projects.** Pass `project` on any mailbox, task or board tool, e.g. `send_message { "project": "musical-tambola", "to": "A", "body": "...", "status": "OPEN" }`.
+3. **All projects at once.** `get_pending_messages`, `wait_for_message`, `get_message_history` and `get_team_status` accept `"project": "all"`. Each returned message carries its `project`.
+4. Call `list_projects` to discover ids.
+
+Message ids are only unique within a project (`C-1` can exist in both). Always pass the same `project` to `claim_message`, `complete_task` and the other lifecycle tools that you used when reading the message.
+
+**Header formats.** `broker` (default) is `### [C-12] Claude -> Codex, 2026-11-20 10:00`. `tel` is `## [MSG-012] C -> A | 2026-11-20 14:45 | OPEN`. `send_message` writes local date and time (`yyyy-MM-dd HH:mm`); older date-only headers and ISO timestamps (`2026-11-20T14:45:12+05:30`) also parse. Tel numbering is global, and the STATUS column is set with `send_message`'s `status`. The format is per project (`projects.<id>.mailbox.headerFormat`).
+
+Recommended Claude Desktop entry (one server, OneBossFight default, Tambola reachable with `project`):
+
+```json
+"mailsocket-claude": {
+  "command": "node",
+  "args": ["C:\\UnrealProject\\MailBoxSocketTactics\\src\\mcp\\McpServer.js", "--agent", "Claude"],
+  "env": { "MAILBOX_PROJECT": "onebossfight" }
+}
+```
+
+If a session should default to another project, set `MAILBOX_PROJECT` to that id (e.g. `musical-tambola`) in a second server entry. Several sessions of the same agent may be connected at once. The broker keeps them all, and the agent shows offline only when its last session disconnects.
 
 ---
 

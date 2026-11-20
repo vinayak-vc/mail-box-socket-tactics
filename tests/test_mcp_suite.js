@@ -84,10 +84,10 @@ TASK: Verify hit collision math on Greystone sword sweep
   try {
     const listRes = await mcpClaude.handleRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = listRes.result.tools;
-    assert.strictEqual(tools.length, 21, 'Must expose all 21 domain tools (16 core + 5 board)');
-    
+    assert.strictEqual(tools.length, 22, 'Must expose all 22 domain tools (16 core + 5 board + list_projects)');
+
     const requiredTools = [
-      'get_team_status', 'get_my_identity', 'get_pending_messages',
+      'list_projects', 'get_team_status', 'get_my_identity', 'get_pending_messages',
       'get_message', 'wait_for_message', 'claim_message',
       'acknowledge_message', 'send_message', 'update_task_status',
       'complete_task', 'fail_task', 'get_task_history',

@@ -64,6 +64,7 @@ class BoardDomainService {
    * Returns the full board state: columns and all tasks.
    */
   getBoard() {
+    this._data = this._load();
     return {
       columns: this._data.columns,
       tasks: this._data.tasks,
@@ -75,7 +76,12 @@ class BoardDomainService {
    * Get a single task by its ID.
    */
   getTask(taskId) {
-    return this._data.tasks.find(t => t.id === taskId) || null;
+    let task = this._data.tasks.find(t => t.id === taskId);
+    if (!task) {
+      this._data = this._load();
+      task = this._data.tasks.find(t => t.id === taskId);
+    }
+    return task || null;
   }
 
   /**

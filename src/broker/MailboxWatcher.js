@@ -14,6 +14,8 @@ class MailboxWatcher extends EventEmitter {
   constructor(options = {}) {
     super();
     this.mailboxPath = options.mailboxPath || path.resolve(__dirname, '../../Documentation/TEAM_MAILBOX.md');
+    this.projectId = options.projectId || null; // Project this mailbox belongs to (multi-project broker)
+    this.headerFormat = options.headerFormat || 'broker'; // Heading format: 'broker' | 'tel'
     this.allowCreate = Boolean(options.allowCreate); // Only true in explicit test setup
     this.failFastOnMissing = options.failFastOnMissing !== undefined ? options.failFastOnMissing : true;
     this.seenMessageIds = new Set(options.seenMessageIds || []);
@@ -74,7 +76,7 @@ class MailboxWatcher extends EventEmitter {
     try {
       const text = await this.readMailboxFile();
       if (text) {
-        const messages = parseMailboxMessages(text);
+        const messages = parseMailboxMessages(text, { format: this.headerFormat });
         for (const msg of messages) {
           this.seenMessageIds.add(msg.id);
         }
@@ -98,7 +100,7 @@ class MailboxWatcher extends EventEmitter {
       const text = await this.readMailboxFile();
       if (!text) return [];
 
-      const messages = parseMailboxMessages(text);
+      const messages = parseMailboxMessages(text, { format: this.headerFormat });
       const newMessages = [];
 
       for (const msg of messages) {
@@ -117,6 +119,7 @@ class MailboxWatcher extends EventEmitter {
           recipientRaw: msg.recipientRaw,
           timestamp: msg.timestamp || new Date().toISOString(),
           mailboxPath: this.mailboxPath,
+          project: this.projectId,
           headerLine: msg.headerLine,
           isMalformed: msg.isMalformed
         });

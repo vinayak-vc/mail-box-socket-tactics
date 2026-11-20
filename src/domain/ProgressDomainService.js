@@ -54,6 +54,7 @@ class ProgressDomainService {
   constructor(options = {}) {
     this.docsDir = options.docsDir || null;
     this.mailboxPath = options.mailboxPath || null;
+    this.headerFormat = options.headerFormat || 'broker'; // Mailbox heading format: 'broker' | 'tel'
     this.cache = { key: '', value: null };
   }
 
@@ -214,8 +215,8 @@ class ProgressDomainService {
   _parseConversation(limit) {
     const text = this._read(path.basename(this.mailboxPath || 'TEAM_MAILBOX.md'));
     const messages = this.mailboxPath && fs.existsSync(this.mailboxPath)
-      ? parseMailboxMessages(fs.readFileSync(this.mailboxPath, 'utf8'))
-      : parseMailboxMessages(text || '');
+      ? parseMailboxMessages(fs.readFileSync(this.mailboxPath, 'utf8'), { format: this.headerFormat })
+      : parseMailboxMessages(text || '', { format: this.headerFormat });
     const lastBySender = {};
     for (const m of messages) {
       lastBySender[m.sender] = { id: m.id, timestamp: m.timestamp };

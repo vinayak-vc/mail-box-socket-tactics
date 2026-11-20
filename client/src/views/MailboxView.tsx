@@ -190,7 +190,8 @@ export const MailboxView: React.FC<MailboxViewProps> = ({ snapshot, onRefresh })
 
               <div className="form-label">Message Content</div>
               <div className="code-preview" style={{ maxHeight: '400px' }}>
-                {`### [${selectedMessage.id}] ${selectedMessage.sender} -> ${selectedMessage.recipientRaw}, ${selectedMessage.timestamp}\n${selectedMessage.body}`}
+                {/* Show the real heading so tel-format messages keep their "| time | STATUS" columns */}
+                {`${selectedMessage.headerLine || `### [${selectedMessage.id}] ${selectedMessage.sender} -> ${selectedMessage.recipientRaw}, ${selectedMessage.timestamp}`}\n${selectedMessage.body}`}
               </div>
             </div>
 

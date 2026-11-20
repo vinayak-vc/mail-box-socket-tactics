@@ -3,13 +3,51 @@
  * Real-time WebSocket connection manager and REST client for MailSocketTactics Control Center.
  */
 
-import { SystemSnapshot, Agent, Task, ActivityEvent, UsageSummary, ProgressData, BoardData, BoardTask, BoardComment } from './types';
+import { SystemSnapshot, Agent, Task, ActivityEvent, UsageSummary, ProgressData, BoardData, BoardTask, BoardComment, ProjectsResponse } from './types';
 
 const isViteDev = window.location.port === '5173';
 const API_BASE = isViteDev ? 'http://127.0.0.1:8766' : '';
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsHost = isViteDev ? '127.0.0.1:8766' : (window.location.host || '127.0.0.1:8766');
 const WS_URL = `${wsProtocol}//${wsHost}`;
+
+// ─── Project selection ─────────────────────────────────────────
+// The selected project is remembered per browser. Every REST call carries it as
+// ?project=<id>; an empty value means "the broker's default project".
+const PROJECT_STORAGE_KEY = 'mst_project';
+let currentProject: string = (() => {
+  try {
+    return localStorage.getItem(PROJECT_STORAGE_KEY) || '';
+  } catch (_) {
+    return '';
+  }
+})();
+const projectListeners: Set<(projectId: string) => void> = new Set();
+
+export function getProject(): string {
+  return currentProject;
+}
+
+export function setProject(projectId: string): void {
+  currentProject = projectId || '';
+  try {
+    if (currentProject) localStorage.setItem(PROJECT_STORAGE_KEY, currentProject);
+    else localStorage.removeItem(PROJECT_STORAGE_KEY);
+  } catch (_) {}
+  projectListeners.forEach(cb => cb(currentProject));
+}
+
+export function onProjectChange(cb: (projectId: string) => void): () => void {
+  projectListeners.add(cb);
+  return () => { projectListeners.delete(cb); };
+}
+
+/** Builds a broker URL scoped to the selected project */
+function apiUrl(pathAndQuery: string): string {
+  if (!currentProject) return `${API_BASE}${pathAndQuery}`;
+  const sep = pathAndQuery.includes('?') ? '&' : '?';
+  return `${API_BASE}${pathAndQuery}${sep}project=${encodeURIComponent(currentProject)}`;
+}
 
 export function getAuthToken(): string {
   if (typeof window !== 'undefined') {
@@ -155,6 +193,8 @@ class ControlCenterClient {
           }
 
           if (msg.type === 'DASHBOARD_EVENT') {
+            const evProject = msg.data && msg.data.project;
+            if (evProject && currentProject && evProject !== currentProject) return;
             this.listeners.forEach(cb => cb(msg.eventType, msg.data));
           }
         } catch (_) {}
@@ -175,12 +215,17 @@ class ControlCenterClient {
   }
 
   public async fetchSnapshot(): Promise<SystemSnapshot> {
-    const res = await fetch(`${API_BASE}/api/snapshot`, {
+    const res = await fetch(apiUrl(`/api/snapshot`), {
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     if (!res.ok) {
       if (res.status === 401) {
         localStorage.removeItem('mst_auth_token');
+      }
+      if (res.status === 404 && currentProject) {
+        // Remembered project was removed from config: fall back to the broker default
+        setProject('');
+        return this.fetchSnapshot();
       }
       throw new Error(`Snapshot request failed with status ${res.status}`);
     }
@@ -188,15 +233,23 @@ class ControlCenterClient {
   }
 
   public async fetchProgress(): Promise<ProgressData> {
-    const res = await fetch(`${API_BASE}/api/progress?messages=30`, {
+    const res = await fetch(apiUrl(`/api/progress?messages=30`), {
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     if (!res.ok) throw new Error(res.status === 401 ? 'Unauthorized: token missing or wrong' : `Progress request failed (${res.status})`);
     return res.json();
   }
 
+  public async fetchProjects(): Promise<ProjectsResponse> {
+    const res = await fetch(`${API_BASE}/api/projects`, {
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+    });
+    if (!res.ok) throw new Error(`Projects request failed (${res.status})`);
+    return res.json();
+  }
+
   public async fetchUsage(): Promise<UsageSummary> {
-    const res = await fetch(`${API_BASE}/api/usage`, {
+    const res = await fetch(apiUrl(`/api/usage`), {
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     if (!res.ok) throw new Error(`Usage request failed with status ${res.status}`);
@@ -204,7 +257,7 @@ class ControlCenterClient {
   }
 
   public async updateAgent(id: string, updates: Partial<Agent>): Promise<Agent> {
-    const res = await fetch(`${API_BASE}/api/agents/${encodeURIComponent(id)}`, {
+    const res = await fetch(apiUrl(`/api/agents/${encodeURIComponent(id)}`), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -221,7 +274,7 @@ class ControlCenterClient {
   }
 
   public async testAgent(id: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/agents/${encodeURIComponent(id)}/test`, {
+    const res = await fetch(apiUrl(`/api/agents/${encodeURIComponent(id)}/test`), {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
@@ -229,7 +282,7 @@ class ControlCenterClient {
   }
 
   public async generatePrompt(agentConfig: any): Promise<string> {
-    const res = await fetch(`${API_BASE}/api/prompt/generate`, {
+    const res = await fetch(apiUrl(`/api/prompt/generate`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -242,7 +295,7 @@ class ControlCenterClient {
   }
 
   public async registerAgent(agentData: any): Promise<Agent> {
-    const res = await fetch(`${API_BASE}/api/agents`, {
+    const res = await fetch(apiUrl(`/api/agents`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -259,7 +312,7 @@ class ControlCenterClient {
   }
 
   public async retryTask(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/requeue`, {
+    const res = await fetch(apiUrl(`/requeue`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -274,7 +327,7 @@ class ControlCenterClient {
   }
 
   public async cancelTask(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tasks/${encodeURIComponent(id)}/cancel`, {
+    const res = await fetch(apiUrl(`/api/tasks/${encodeURIComponent(id)}/cancel`), {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
@@ -285,7 +338,7 @@ class ControlCenterClient {
   }
 
   public async postMailboxMessage(as: string, to: string, body: string): Promise<string> {
-    const res = await fetch(`${API_BASE}/api/mailbox/post`, {
+    const res = await fetch(apiUrl(`/api/mailbox/post`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -302,7 +355,7 @@ class ControlCenterClient {
   }
 
   public async serviceControl(action: 'start' | 'stop' | 'restart' | 'status', target: 'all' | 'broker' | 'adapters'): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/service/control`, {
+    const res = await fetch(apiUrl(`/api/service/control`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -318,17 +371,17 @@ class ControlCenterClient {
   }
 
   public getExportUrl(format: 'json' | 'csv'): string {
-    return `${API_BASE}/api/logs?format=${format}`;
+    return apiUrl(`/api/logs?format=${format}`);
   }
 
   public async fetchEmailStatus(): Promise<{ enabled: boolean; hasApiKey?: boolean; ownerEmailMasked?: string }> {
-    const res = await fetch(`${API_BASE}/api/notify/status`);
+    const res = await fetch(apiUrl(`/api/notify/status`));
     if (!res.ok) return { enabled: false };
     return res.json();
   }
 
   public async notifyOwner(payload: { subject: string; message: string; urgency?: string; taskReference?: string; senderAgent?: string }): Promise<any> {
-    const res = await fetch(`${API_BASE}/api/notify/owner`, {
+    const res = await fetch(apiUrl(`/api/notify/owner`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -346,7 +399,7 @@ class ControlCenterClient {
   // ─── Kanban Board API ─────────────────────────────────────────
 
   public async fetchBoard(): Promise<BoardData> {
-    const res = await fetch(`${API_BASE}/api/board`, {
+    const res = await fetch(apiUrl(`/api/board`), {
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });
     if (!res.ok) throw new Error(`Board fetch failed (${res.status})`);
@@ -362,7 +415,7 @@ class ControlCenterClient {
     labels?: string[];
     createdBy?: string;
   }): Promise<BoardTask> {
-    const res = await fetch(`${API_BASE}/api/board/tasks`, {
+    const res = await fetch(apiUrl(`/api/board/tasks`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -386,7 +439,7 @@ class ControlCenterClient {
     priority?: string;
     labels?: string[];
   }>, createdBy?: string): Promise<BoardTask[]> {
-    const res = await fetch(`${API_BASE}/api/board/tasks/bulk`, {
+    const res = await fetch(apiUrl(`/api/board/tasks/bulk`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -403,7 +456,7 @@ class ControlCenterClient {
   }
 
   public async updateBoardTask(taskId: string, updates: Partial<BoardTask> & { updatedBy?: string }): Promise<BoardTask> {
-    const res = await fetch(`${API_BASE}/api/board/tasks/${encodeURIComponent(taskId)}`, {
+    const res = await fetch(apiUrl(`/api/board/tasks/${encodeURIComponent(taskId)}`), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -420,7 +473,7 @@ class ControlCenterClient {
   }
 
   public async moveBoardTask(taskId: string, column: string, movedBy?: string): Promise<BoardTask> {
-    const res = await fetch(`${API_BASE}/api/board/tasks/${encodeURIComponent(taskId)}/move`, {
+    const res = await fetch(apiUrl(`/api/board/tasks/${encodeURIComponent(taskId)}/move`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -437,7 +490,7 @@ class ControlCenterClient {
   }
 
   public async addBoardTaskComment(taskId: string, text: string, author?: string): Promise<BoardComment> {
-    const res = await fetch(`${API_BASE}/api/board/tasks/${encodeURIComponent(taskId)}/comment`, {
+    const res = await fetch(apiUrl(`/api/board/tasks/${encodeURIComponent(taskId)}/comment`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -454,7 +507,7 @@ class ControlCenterClient {
   }
 
   public async deleteBoardTask(taskId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/board/tasks/${encodeURIComponent(taskId)}`, {
+    const res = await fetch(apiUrl(`/api/board/tasks/${encodeURIComponent(taskId)}`), {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${getAuthToken()}` }
     });

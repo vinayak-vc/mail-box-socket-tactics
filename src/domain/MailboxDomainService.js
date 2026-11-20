@@ -14,6 +14,9 @@ class MailboxDomainService {
     this.mailboxPath = options.mailboxPath || path.resolve(__dirname, '../../Documentation/TEAM_MAILBOX.md');
     this.httpPort = options.httpPort || 8766;
     this.postScriptPath = options.postScriptPath || path.resolve(__dirname, '../../scripts/MailboxPostSocket.ps1');
+    this.projectId = options.projectId || null; // Owning project id (multi-project installs)
+    this.headerFormat = options.headerFormat || 'broker'; // Heading format: 'broker' | 'tel'
+    this.mutexName = options.mutexName || null; // Named mutex guarding appends (null = script default)
   }
 
   /**
@@ -33,7 +36,7 @@ class MailboxDomainService {
 
     try {
       const content = await fs.promises.readFile(this.mailboxPath, 'utf8');
-      return parseMailboxMessages(content);
+      return parseMailboxMessages(content, { format: this.headerFormat });
     } catch (err) {
       console.error(`[MailboxDomainService] Error reading mailbox: ${err.message}`);
       return [];
@@ -110,7 +113,7 @@ class MailboxDomainService {
   /**
    * Posts a new message to TEAM_MAILBOX.md under mutex via MailboxPostSocket.ps1
    */
-  async postMessage({ as, to, body }) {
+  async postMessage({ as, to, body, status = null }) {
     if (!as || !to || !body) {
       throw new Error("Missing required fields: 'as', 'to', 'body'");
     }
@@ -119,7 +122,8 @@ class MailboxDomainService {
     const validParties = ['C', 'X', 'A', 'H'];
     let partyCode = as.trim().toUpperCase();
     if (!validParties.includes(partyCode)) {
-      const norm = normalizeAgentId(as);
+      // normalizeAgentId returns canonical casing ('Claude'), so compare lowercased
+      const norm = String(normalizeAgentId(as) || '').toLowerCase();
       if (norm === 'claude') partyCode = 'C';
       else if (norm === 'codex') partyCode = 'X';
       else if (norm === 'antigravity') partyCode = 'A';
@@ -142,6 +146,19 @@ class MailboxDomainService {
 
       if (this.mailboxPath && fs.existsSync(this.mailboxPath)) {
         args.push('-Mailbox', this.mailboxPath);
+      }
+      if (this.mutexName) {
+        args.push('-MutexName', this.mutexName);
+      }
+      if (this.headerFormat && this.headerFormat !== 'broker') {
+        args.push('-Format', this.headerFormat);
+      }
+      if (this.projectId) {
+        args.push('-Project', this.projectId);
+      }
+      // Tel headers carry a STATUS column (OPEN, ACK, REVIEW, ...); validated by the script
+      if (this.headerFormat === 'tel' && status) {
+        args.push('-Status', String(status).trim().toUpperCase());
       }
 
       // Pass auth token to post script if configured
@@ -168,11 +185,13 @@ class MailboxDomainService {
       ps.on('close', (code) => {
         if (code === 0) {
           // Extract message ID from output (e.g. "POSTED C-1")
-          const match = stdout.match(/POSTED\s+([A-Z]-\d+)/i);
+          // Broker format prints "POSTED C-1"; tel format prints "POSTED MSG-003"
+          const match = stdout.match(/POSTED\s+([A-Z]+-\d+)/i);
           const messageId = match ? match[1] : null;
           resolve({
             success: true,
             messageId,
+            project: this.projectId,
             output: stdout.trim()
           });
         } else {

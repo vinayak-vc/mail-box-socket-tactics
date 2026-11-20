@@ -66,6 +66,10 @@ export interface MailboxMessage {
   recipientRaw: string;
   timestamp: string;
   rawHeader?: string;
+  /** Exact heading line from the mailbox file (broker or tel format) */
+  headerLine?: string;
+  /** STATUS column of tel-format headings (OPEN, ACK, REVIEW, ...) */
+  status?: string;
   body: string;
 }
 
@@ -81,8 +85,30 @@ export interface ActivityEvent {
   summary: string;
 }
 
+/** One project served by the broker (GET /api/projects, snapshot.projects) */
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  mailboxPath: string | null;
+  exists: boolean;
+  headerFormat: 'broker' | 'tel' | string;
+  watcherRunning: boolean;
+  watcherError?: string | null;
+  taskCounts: { pending: number; running: number; completed: number; deadLetters: number };
+}
+
+export interface ProjectsResponse {
+  defaultProject: string;
+  projects: ProjectSummary[];
+}
+
 export interface SystemSnapshot {
   timestamp: string;
+  /** Project this snapshot is scoped to */
+  project?: { id: string; name: string; isDefault: boolean; headerFormat: string };
+  defaultProject?: string;
+  projects?: ProjectSummary[];
   broker: {
     status: 'UP' | 'DOWN';
     host: string;
@@ -120,6 +146,8 @@ export interface SystemSnapshot {
   mailbox: {
     path?: string | null;
     exists: boolean;
+    headerFormat?: string;
+    mutexName?: string | null;
     totalMessages: number;
     messages: MailboxMessage[];
   };

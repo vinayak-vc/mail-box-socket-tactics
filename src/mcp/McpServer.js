@@ -12,27 +12,76 @@ const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
 const WebSocket = require('ws');
-const { createDomainServices } = require('../domain');
+const crypto = require('crypto');
+const { createDomainServices, createProjectServices } = require('../domain');
 const StateStore = require('../broker/StateStore');
 const AgentRegistry = require('../broker/AgentRegistry');
 const ActivityLogger = require('../broker/ActivityLogger');
 const { normalizeAgentId, EVENT_TYPES } = require('../protocol/MessageProtocol');
+const { normalizeProjects, readConfigFile, findProjectByMailboxPath, LEGACY_PROJECT_ID } = require('../config/ProjectConfig');
+
+/** Project selector that means "every configured project" (read-only tools only) */
+const ALL_PROJECTS = new Set(['*', 'all']);
+
+/** Shared JSON schema for the optional `project` tool argument */
+const PROJECT_PROP = {
+  type: 'string',
+  description: 'Project id (see list_projects). Defaults to this server\'s default project (MAILBOX_PROJECT / MAILBOX_PATH).'
+};
+const PROJECT_PROP_MULTI = {
+  type: 'string',
+  description: 'Project id (see list_projects), or "all" to cover every configured project. Defaults to this server\'s default project.'
+};
 
 class McpServer {
   constructor(options = {}) {
     this.agentId = options.agentId || process.env.MCP_AGENT_ID || this._parseAgentArg() || 'Claude';
     this.projectRoot = options.projectRoot || path.resolve(__dirname, '../..');
-    this.mailboxPath = options.mailboxPath || process.env.MAILBOX_PATH || path.resolve(this.projectRoot, '../OneBossFight/Documentation/TEAM_MAILBOX.md');
-    
-    // Fallback mailbox if primary does not exist
-    if (!fs.existsSync(this.mailboxPath)) {
-      const localMb = path.resolve(this.projectRoot, 'Documentation/TEAM_MAILBOX.md');
-      if (fs.existsSync(localMb)) this.mailboxPath = localMb;
+    this.configPath = options.configPath || path.resolve(this.projectRoot, 'config/default.json');
+    // Unique per process: lets the broker replace this process's own stale socket on reconnect
+    // without evicting other sessions of the same agent.
+    this.instanceId = `${this.agentId}-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+
+    // ─── Projects ───────────────────────────────────────────────
+    // Default project precedence: options.project / MAILBOX_PROJECT > options.mailboxPath /
+    // MAILBOX_PATH (matched against configured projects, else an ad-hoc project) > config defaultProject.
+    this.projectDefs = new Map();
+    let cfgDefault = null;
+    try {
+      const normalized = normalizeProjects(readConfigFile(this.configPath), { root: this.projectRoot });
+      for (const def of normalized.projects) this.projectDefs.set(def.id, def);
+      cfgDefault = normalized.defaultProject;
+    } catch (err) {
+      // stdout is reserved for JSON-RPC; config problems go to stderr and the server keeps working
+      process.stderr.write(`[McpServer] Ignoring invalid project config: ${err.message}\n`);
     }
+
+    const requestedProject = options.project || process.env.MAILBOX_PROJECT || null;
+    const requestedPath = options.mailboxPath || process.env.MAILBOX_PATH || null;
+
+    if (requestedProject) {
+      const id = String(requestedProject).trim().toLowerCase();
+      if (!this.projectDefs.has(id)) {
+        throw new Error(`MAILBOX_PROJECT '${requestedProject}' is not configured (known: ${[...this.projectDefs.keys()].join(', ') || 'none'})`);
+      }
+      this.defaultProjectId = id;
+    } else if (requestedPath) {
+      const match = findProjectByMailboxPath([...this.projectDefs.values()], requestedPath);
+      this.defaultProjectId = match ? match.id : this._registerAdHocProject(requestedPath, options);
+    } else if (cfgDefault) {
+      this.defaultProjectId = cfgDefault;
+    } else {
+      // No config at all: legacy OneBossFight location
+      this.defaultProjectId = this._registerAdHocProject(path.resolve(this.projectRoot, '../OneBossFight/Documentation/TEAM_MAILBOX.md'), options);
+    }
+
+    const defaultDef = this.projectDefs.get(this.defaultProjectId);
+    this.mailboxPath = defaultDef.mailboxPath;
 
     // Initialize domain services
     this.stateStore = options.stateStore || new StateStore({
-      statePath: options.statePath || path.resolve(this.projectRoot, 'data/mailbox_state.json')
+      statePath: options.statePath || defaultDef.statePath,
+      projectId: defaultDef.id
     });
 
     this.agentRegistry = options.agentRegistry || new AgentRegistry({
@@ -48,7 +97,22 @@ class McpServer {
       mailboxPath: this.mailboxPath,
       stateStore: this.stateStore,
       agentRegistry: this.agentRegistry,
-      logger: this.logger
+      logger: this.logger,
+      projectId: defaultDef.id,
+      headerFormat: defaultDef.headerFormat,
+      mutexName: defaultDef.mutexName,
+      docsDir: defaultDef.docsDir,
+      boardStoragePath: defaultDef.boardPath
+    });
+
+    // Per-project runtime contexts (created lazily); the default one reuses the services above
+    this._projectCtx = new Map();
+    this._projectCtx.set(defaultDef.id, {
+      id: defaultDef.id,
+      name: defaultDef.name,
+      def: defaultDef,
+      stateStore: this.stateStore,
+      services: this.services
     });
 
     // Validate and bind identity
@@ -65,6 +129,69 @@ class McpServer {
     if (options.connectBroker) {
       this.connectBroker();
     }
+  }
+
+  /**
+   * Registers a project for a mailbox path that is not in config (MAILBOX_PATH / tests).
+   * Keeps the legacy behaviour: falls back to Documentation/TEAM_MAILBOX.md when missing,
+   * and uses data/mailbox_state.json unless a statePath is given.
+   */
+  _registerAdHocProject(mailboxPath, options = {}) {
+    let mbPath = path.resolve(mailboxPath);
+    if (!fs.existsSync(mbPath)) {
+      const localMb = path.resolve(this.projectRoot, 'Documentation/TEAM_MAILBOX.md');
+      if (fs.existsSync(localMb)) mbPath = localMb;
+    }
+    const id = this.projectDefs.has(LEGACY_PROJECT_ID) ? 'mailbox-path' : LEGACY_PROJECT_ID;
+    this.projectDefs.set(id, {
+      id,
+      name: path.basename(path.dirname(mbPath)) || id,
+      mailboxPath: mbPath,
+      configuredMailboxPath: mbPath,
+      mutexName: process.env.MAILBOX_MUTEX || 'Global\\OneBossFightMailbox',
+      headerFormat: (process.env.MAILBOX_HEADER_FORMAT || 'broker').toLowerCase(),
+      statePath: options.statePath || path.resolve(this.projectRoot, 'data/mailbox_state.json'),
+      boardPath: path.resolve(this.projectRoot, 'data/board.json'),
+      docsDir: null,
+      adHoc: true
+    });
+    return id;
+  }
+
+  /**
+   * Resolves the `project` tool argument to a project context (default project when omitted).
+   * @throws {Error} for unknown projects
+   */
+  _getProject(projectId) {
+    const id = projectId ? String(projectId).trim().toLowerCase() : this.defaultProjectId;
+    if (this._projectCtx.has(id)) return this._projectCtx.get(id);
+
+    const def = this.projectDefs.get(id);
+    if (!def) {
+      throw new Error(`Unknown project '${projectId}'. Known projects: ${[...this.projectDefs.keys()].join(', ')}`);
+    }
+    const stateStore = new StateStore({ statePath: def.statePath, projectId: def.id });
+    const services = createProjectServices({
+      mailboxPath: def.mailboxPath,
+      stateStore,
+      logger: this.logger,
+      projectId: def.id,
+      headerFormat: def.headerFormat,
+      mutexName: def.mutexName,
+      docsDir: def.docsDir,
+      boardStoragePath: def.boardPath
+    });
+    const ctx = { id: def.id, name: def.name, def, stateStore, services };
+    this._projectCtx.set(id, ctx);
+    return ctx;
+  }
+
+  /** Project contexts for a read-only tool: every project for "all"/"*", else one */
+  _getProjects(projectId) {
+    if (projectId && ALL_PROJECTS.has(String(projectId).trim().toLowerCase())) {
+      return [...this.projectDefs.keys()].map(id => this._getProject(id));
+    }
+    return [this._getProject(projectId)];
   }
 
   _loadBrokerConfig(options = {}) {
@@ -132,7 +259,8 @@ class McpServer {
           ws.send(JSON.stringify({
             type: EVENT_TYPES.AUTH_REQUEST,
             agentId: this.canonicalAgent.id,
-            token: token
+            token: token,
+            instanceId: this.instanceId
           }));
         } catch (_) {}
       });
@@ -248,11 +376,21 @@ class McpServer {
   getTools() {
     return [
       {
+        name: 'list_projects',
+        description: 'Lists the projects this MailSocket install serves (id, name, mailbox path, header format). Pass a project id as the "project" argument of other tools.',
+        inputSchema: {
+          type: 'object',
+          properties: {}
+        }
+      },
+      {
         name: 'get_team_status',
         description: 'Returns operational summary of the AI team, system health, task counts, and broker status.',
         inputSchema: {
           type: 'object',
-          properties: {}
+          properties: {
+            project: PROJECT_PROP_MULTI
+          }
         }
       },
       {
@@ -269,6 +407,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP_MULTI,
             limit: { type: 'number', description: 'Maximum messages to return (default 20)' }
           }
         }
@@ -279,6 +418,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             messageId: { type: 'string', description: 'The message ID to retrieve' }
           },
           required: ['messageId']
@@ -290,6 +430,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP_MULTI,
             timeoutSeconds: { type: 'number', description: 'Timeout in seconds (default 30, max 120)' }
           }
         }
@@ -300,6 +441,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             messageId: { type: 'string', description: 'The message ID to claim' },
             leaseMs: { type: 'number', description: 'Lease duration in milliseconds (default 120000)' }
           },
@@ -312,6 +454,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             messageId: { type: 'string', description: 'The message ID being acknowledged' },
             status: { type: 'string', description: 'Status (CLAIMED or RUNNING)', default: 'CLAIMED' }
           },
@@ -324,8 +467,14 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             to: { type: 'string', description: 'Recipient party code or agent name (e.g. Claude, Codex, Antigravity, Owner)' },
-            body: { type: 'string', description: 'Message body and task details' }
+            body: { type: 'string', description: 'Message body and task details' },
+            status: {
+              type: 'string',
+              enum: ['OPEN', 'ACK', 'IN_PROGRESS', 'DONE', 'BLOCKED', 'REVIEW', 'ACCEPTED', 'CHANGES_REQUESTED'],
+              description: 'Header STATUS for projects using the "tel" mailbox format (default OPEN). Ignored for broker-format mailboxes.'
+            }
           },
           required: ['to', 'body']
         }
@@ -336,6 +485,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             messageId: { type: 'string', description: 'The message/task ID' },
             status: { type: 'string', description: 'New status (RUNNING)' },
             details: { type: 'string', description: 'Optional status notes' }
@@ -349,6 +499,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             messageId: { type: 'string', description: 'The task/message ID' },
             responseMessageId: { type: 'string', description: 'ID of the reply message posted to the mailbox (if any)' },
             evidence: { type: 'object', description: 'Completion evidence, summary, or output metrics' }
@@ -362,6 +513,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             messageId: { type: 'string', description: 'The task/message ID' },
             error: { type: 'string', description: 'Detailed failure message or exception' },
             isPermanent: { type: 'boolean', description: 'Whether the error cannot be retried', default: false }
@@ -375,6 +527,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             messageId: { type: 'string', description: 'The task/message ID' }
           },
           required: ['messageId']
@@ -386,6 +539,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP_MULTI,
             limit: { type: 'number', description: 'Number of messages to retrieve (default 20)' }
           }
         }
@@ -434,6 +588,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             column: { type: 'string', description: 'Optional: filter tasks by column (backlog, todo, in-progress, review, done)' },
             assignee: { type: 'string', description: 'Optional: filter tasks by assignee agent ID' }
           }
@@ -445,6 +600,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             title: { type: 'string', description: 'Short task title' },
             description: { type: 'string', description: 'Detailed description of the work' },
             column: { type: 'string', enum: ['backlog', 'todo', 'in-progress', 'review', 'done'], description: 'Target column (default: backlog)' },
@@ -461,6 +617,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             taskId: { type: 'string', description: 'Board task ID (e.g. BT-1)' },
             column: { type: 'string', enum: ['backlog', 'todo', 'in-progress', 'review', 'done'], description: 'Target column to move to' }
           },
@@ -473,6 +630,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             taskId: { type: 'string', description: 'Board task ID (e.g. BT-1)' },
             text: { type: 'string', description: 'Comment text content' }
           },
@@ -485,6 +643,7 @@ class McpServer {
         inputSchema: {
           type: 'object',
           properties: {
+            project: PROJECT_PROP,
             taskId: { type: 'string', description: 'Board task ID (e.g. BT-1)' },
             title: { type: 'string', description: 'New title' },
             description: { type: 'string', description: 'New description' },
@@ -505,10 +664,29 @@ class McpServer {
     const callerId = this.canonicalAgent.id;
     const callerParty = this.canonicalAgent.partyCode || callerId.charAt(0).toUpperCase();
 
+    // Unknown project ids fail before any side effect
+    const isMulti = args.project && ALL_PROJECTS.has(String(args.project).trim().toLowerCase());
+    const project = (name === 'list_projects' || isMulti) ? null : this._getProject(args.project);
+
     switch (name) {
+      case 'list_projects': {
+        return {
+          defaultProject: this.defaultProjectId,
+          projects: [...this.projectDefs.values()].map(d => ({
+            id: d.id,
+            name: d.name,
+            isDefault: d.id === this.defaultProjectId,
+            mailboxPath: d.mailboxPath,
+            exists: fs.existsSync(d.mailboxPath),
+            headerFormat: d.headerFormat || 'broker'
+          }))
+        };
+      }
+
       case 'get_team_status': {
         const agents = this.services.agentService.getAllAgents();
-        const allTasks = Array.from(this.stateStore.tasks.values());
+        const contexts = this._getProjects(args.project);
+        const allTasks = contexts.flatMap(c => Array.from(c.stateStore.tasks.values()));
         const pending = allTasks.filter(t => t.status === 'PENDING').length;
         const running = allTasks.filter(t => t.status === 'RUNNING' || t.status === 'CLAIMED').length;
         const completed = allTasks.filter(t => t.status === 'COMPLETED').length;
@@ -517,7 +695,9 @@ class McpServer {
           status: 'UP',
           authenticatedAs: callerId,
           partyCode: callerParty,
-          mailboxPath: this.mailboxPath,
+          project: contexts.length === 1 ? contexts[0].id : contexts.map(c => c.id),
+          defaultProject: this.defaultProjectId,
+          mailboxPath: contexts.length === 1 ? contexts[0].def.mailboxPath : contexts.map(c => c.def.mailboxPath),
           agents: agents.map(a => ({
             id: a.id,
             displayName: a.displayName,
@@ -542,9 +722,10 @@ class McpServer {
       }
 
       case 'get_pending_messages': {
-        const msgs = await this.services.mailboxService.getPendingMessagesForAgent(callerId, this.stateStore);
+        const msgs = await this._pendingFor(callerId, args.project);
         const limit = args.limit || 20;
         return {
+          project: isMulti ? 'all' : project.id,
           total: msgs.length,
           messages: msgs.slice(0, limit)
         };
@@ -552,9 +733,9 @@ class McpServer {
 
       case 'get_message': {
         if (!args.messageId) throw new Error("Argument 'messageId' is required");
-        const msg = await this.services.mailboxService.getMessageById(args.messageId);
-        if (!msg) throw new Error(`Message '${args.messageId}' not found`);
-        return msg;
+        const msg = await project.services.mailboxService.getMessageById(args.messageId);
+        if (!msg) throw new Error(`Message '${args.messageId}' not found in project '${project.id}'`);
+        return { ...msg, project: project.id };
       }
 
       case 'wait_for_message': {
@@ -563,10 +744,11 @@ class McpServer {
         const timeoutMs = timeoutSec * 1000;
 
         while (Date.now() - startTime < timeoutMs) {
-          const pending = await this.services.mailboxService.getPendingMessagesForAgent(callerId, this.stateStore);
+          const pending = await this._pendingFor(callerId, args.project);
           if (pending.length > 0) {
             return {
               timeout: false,
+              project: pending[0].project,
               message: pending[0],
               pendingCount: pending.length
             };
@@ -578,55 +760,59 @@ class McpServer {
           timeout: true,
           message: null,
           waitedSeconds: timeoutSec,
+          project: isMulti ? 'all' : project.id,
           note: `No new messages for ${callerId} within ${timeoutSec} seconds.`
         };
       }
 
       case 'claim_message': {
         if (!args.messageId) throw new Error("Argument 'messageId' is required");
-        const res = await this.services.taskService.claimMessage({
+        const res = await project.services.taskService.claimMessage({
           messageId: args.messageId,
           agentId: callerId,
           leaseMs: args.leaseMs || 120000
         });
         this._sendToBroker({
           type: EVENT_TYPES.MESSAGE_ACK,
+          project: project.id,
           messageId: args.messageId,
           status: 'CLAIMED',
           workerId: callerId
         });
-        return res;
+        return { ...res, project: project.id };
       }
 
       case 'acknowledge_message': {
         if (!args.messageId) throw new Error("Argument 'messageId' is required");
         const status = args.status === 'RUNNING' ? 'RUNNING' : 'CLAIMED';
-        const res = await this.services.taskService.updateStatus({
+        const res = await project.services.taskService.updateStatus({
           messageId: args.messageId,
           status,
           agentId: callerId
         });
         this._sendToBroker({
           type: EVENT_TYPES.MESSAGE_ACK,
+          project: project.id,
           messageId: args.messageId,
           status,
           workerId: callerId
         });
-        return res;
+        return { ...res, project: project.id };
       }
 
       case 'send_message': {
         if (!args.to || !args.body) throw new Error("Arguments 'to' and 'body' are required");
-        return await this.services.mailboxService.postMessage({
+        return await project.services.mailboxService.postMessage({
           as: callerParty,
           to: args.to,
-          body: args.body
+          body: args.body,
+          status: args.status || null
         });
       }
 
       case 'update_task_status': {
         if (!args.messageId || !args.status) throw new Error("Arguments 'messageId' and 'status' are required");
-        const res = await this.services.taskService.updateStatus({
+        const res = await project.services.taskService.updateStatus({
           messageId: args.messageId,
           status: args.status,
           agentId: callerId,
@@ -634,16 +820,17 @@ class McpServer {
         });
         this._sendToBroker({
           type: EVENT_TYPES.MESSAGE_ACK,
+          project: project.id,
           messageId: args.messageId,
           status: args.status,
           workerId: callerId
         });
-        return res;
+        return { ...res, project: project.id };
       }
 
       case 'complete_task': {
         if (!args.messageId) throw new Error("Argument 'messageId' is required");
-        const res = await this.services.taskService.completeTask({
+        const res = await project.services.taskService.completeTask({
           messageId: args.messageId,
           agentId: callerId,
           responseMessageId: args.responseMessageId,
@@ -652,6 +839,7 @@ class McpServer {
 
         this._sendToBroker({
           type: EVENT_TYPES.MESSAGE_ACK,
+          project: project.id,
           messageId: args.messageId,
           status: 'COMPLETED',
           workerId: callerId,
@@ -660,12 +848,12 @@ class McpServer {
 
         // Record usage metric
         this.services.usageService.recordTaskUsage(callerId, 0, 0, 0);
-        return res;
+        return { ...res, project: project.id };
       }
 
       case 'fail_task': {
         if (!args.messageId || !args.error) throw new Error("Arguments 'messageId' and 'error' are required");
-        const res = await this.services.taskService.failTask({
+        const res = await project.services.taskService.failTask({
           messageId: args.messageId,
           agentId: callerId,
           error: args.error,
@@ -673,26 +861,30 @@ class McpServer {
         });
         this._sendToBroker({
           type: EVENT_TYPES.MESSAGE_ACK,
+          project: project.id,
           messageId: args.messageId,
           status: 'FAILED',
           workerId: callerId,
           error: args.error
         });
-        return res;
+        return { ...res, project: project.id };
       }
 
       case 'get_task_history': {
         if (!args.messageId) throw new Error("Argument 'messageId' is required");
-        return this.services.taskService.getTaskHistory(args.messageId);
+        return { ...project.services.taskService.getTaskHistory(args.messageId), project: project.id };
       }
 
       case 'get_message_history': {
         const limit = args.limit || 20;
-        const messages = await this.services.mailboxService.getMessageHistory({
-          agentId: callerId,
-          limit
-        });
-        return { count: messages.length, messages };
+        const contexts = this._getProjects(args.project);
+        let messages = [];
+        for (const c of contexts) {
+          const list = await c.services.mailboxService.getMessageHistory({ agentId: callerId, limit });
+          messages = messages.concat(list.map(m => ({ ...m, project: c.id })));
+        }
+        messages = messages.slice(-limit);
+        return { project: isMulti ? 'all' : project.id, count: messages.length, messages };
       }
 
       case 'get_agent_status': {
@@ -736,26 +928,26 @@ class McpServer {
             summary: `Owner email dispatch by ${callerId}: ${args.subject} (${res.status})`
           });
         }
-        return res;
+        return { ...res, project: project.id };
       }
 
       // ─── Kanban Board Tool Handlers ─────────────────────────────
 
       case 'get_board': {
-        const board = this.services.boardService.getBoard();
+        const board = project.services.boardService.getBoard();
         if (args.column || args.assignee) {
-          const filtered = this.services.boardService.getTasks({
+          const filtered = project.services.boardService.getTasks({
             column: args.column,
             assignee: args.assignee
           });
-          return { columns: board.columns, tasks: filtered, taskCount: filtered.length };
+          return { project: project.id, columns: board.columns, tasks: filtered, taskCount: filtered.length };
         }
-        return board;
+        return { project: project.id, ...board };
       }
 
       case 'create_board_task': {
         if (!args.title) throw new Error("Argument 'title' is required");
-        const task = this.services.boardService.createTask({
+        const task = project.services.boardService.createTask({
           title: args.title,
           description: args.description || '',
           column: args.column || 'backlog',
@@ -764,31 +956,43 @@ class McpServer {
           labels: args.labels || [],
           createdBy: callerId
         });
-        return { success: true, task };
+        return { success: true, project: project.id, task };
       }
 
       case 'move_board_task': {
         if (!args.taskId || !args.column) throw new Error("Arguments 'taskId' and 'column' are required");
-        const task = this.services.boardService.moveTask(args.taskId, args.column, callerId);
-        return { success: true, task };
+        const task = project.services.boardService.moveTask(args.taskId, args.column, callerId);
+        return { success: true, project: project.id, task };
       }
 
       case 'add_board_comment': {
         if (!args.taskId || !args.text) throw new Error("Arguments 'taskId' and 'text' are required");
-        const comment = this.services.boardService.addComment(args.taskId, args.text, callerId);
-        return { success: true, comment };
+        const comment = project.services.boardService.addComment(args.taskId, args.text, callerId);
+        return { success: true, project: project.id, comment };
       }
 
       case 'update_board_task': {
         if (!args.taskId) throw new Error("Argument 'taskId' is required");
-        const { taskId, ...updates } = args;
-        const task = this.services.boardService.updateTask(taskId, updates, callerId);
-        return { success: true, task };
+        const { taskId, project: _project, ...updates } = args;
+        const task = project.services.boardService.updateTask(taskId, updates, callerId);
+        return { success: true, project: project.id, task };
       }
 
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
+  }
+
+  /**
+   * Pending messages for an agent in one project (or every project for "all"), tagged with project id
+   */
+  async _pendingFor(agentId, projectArg) {
+    const out = [];
+    for (const c of this._getProjects(projectArg)) {
+      const msgs = await c.services.mailboxService.getPendingMessagesForAgent(agentId, c.stateStore);
+      for (const m of msgs) out.push({ ...m, project: c.id });
+    }
+    return out;
   }
 
   /**
@@ -832,6 +1036,8 @@ class McpServer {
 3. Parties: C (Claude), X (Codex), A (Antigravity), H (Human Owner).
 4. Do not perform duplicate work: check task claims before proceeding.
 5. Post completion replies directly to TEAM_MAILBOX.md under mutex.
+6. Multi-project: every mailbox/task/board tool takes an optional "project" argument (see list_projects).
+   Projects may use the "tel" heading format: ## [MSG-###] FROM -> TO | YYYY-MM-DD | STATUS
 `
       };
     }

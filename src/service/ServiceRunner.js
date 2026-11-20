@@ -13,6 +13,7 @@ const ZrokManager = require('./ZrokManager');
 const ClaudeAdapter = require('../adapters/ClaudeAdapter');
 const CodexAdapter = require('../adapters/CodexAdapter');
 const AntigravityAdapter = require('../adapters/AntigravityAdapter');
+const { normalizeProjects } = require('../config/ProjectConfig');
 
 const CONFIG_PATH = path.resolve(__dirname, '../../config/default.json');
 const ENV_PATH = path.resolve(__dirname, '../../config/.env');
@@ -61,7 +62,18 @@ function loadConfig() {
   if (process.env.MAILBOX_AUTH_TOKEN) config.broker.authToken = process.env.MAILBOX_AUTH_TOKEN;
   if (process.env.MAILBOX_WS_PORT) config.broker.port = parseInt(process.env.MAILBOX_WS_PORT, 10);
   if (process.env.MAILBOX_HTTP_PORT) config.broker.httpPort = parseInt(process.env.MAILBOX_HTTP_PORT, 10);
-  if (process.env.MAILBOX_PATH) config.mailbox.path = process.env.MAILBOX_PATH;
+  // MAILBOX_PATH overrides the legacy single mailbox, or the default project's mailbox
+  if (process.env.MAILBOX_PROJECT) config.defaultProject = process.env.MAILBOX_PROJECT.trim().toLowerCase();
+  if (process.env.MAILBOX_PATH) {
+    if (config.projects && Object.keys(config.projects).length > 0) {
+      const id = config.defaultProject || Object.keys(config.projects)[0];
+      if (config.projects[id]) {
+        config.projects[id].mailbox = { ...(config.projects[id].mailbox || {}), path: process.env.MAILBOX_PATH };
+      }
+    } else {
+      config.mailbox = { ...(config.mailbox || {}), path: process.env.MAILBOX_PATH };
+    }
+  }
 
   if (process.env.ZROK_TOKEN) {
     if (!config.zrok) config.zrok = {};
@@ -79,15 +91,24 @@ function loadConfig() {
     throw new Error('MAILBOX_AUTH_TOKEN is not set (or is the old default). Set a random value in config/.env before starting.');
   }
 
-  // Validate authoritative mailbox path
-  if (!fs.existsSync(config.mailbox.path)) {
-    if (config.mailbox.fallbackPath && fs.existsSync(config.mailbox.fallbackPath)) {
-      console.log(`[ServiceRunner] Primary mailbox not found, using fallback: ${config.mailbox.fallbackPath}`);
-      config.mailbox.path = config.mailbox.fallbackPath;
-    } else {
-      console.warn(`[ServiceRunner] Warning: Configured mailbox does not exist at '${config.mailbox.path}'`);
+  // Normalize "projects" (or the legacy single "mailbox") into a validated project list.
+  // Fallback paths are applied here; missing mailboxes are reported, not created.
+  const { defaultProject, projects } = normalizeProjects(config);
+  if (projects.length === 0) {
+    throw new Error('No mailbox configured: add a "projects" map (or a legacy "mailbox" block) to config/default.json.');
+  }
+  for (const p of projects) {
+    if (p.usingFallback) {
+      console.log(`[ServiceRunner] [${p.id}] Primary mailbox not found, using fallback: ${p.mailboxPath}`);
+    } else if (!fs.existsSync(p.mailboxPath)) {
+      console.warn(`[ServiceRunner] [${p.id}] Warning: Configured mailbox does not exist at '${p.mailboxPath}'`);
     }
   }
+  config.projectList = projects;
+  config.defaultProject = defaultProject;
+  const def = projects.find(p => p.id === defaultProject) || projects[0];
+  // Legacy consumers (adapters) read config.mailbox: point it at the default project
+  config.mailbox = { ...(config.mailbox || {}), path: def.mailboxPath, mutexName: def.mutexName, projectId: def.id, headerFormat: def.headerFormat };
 
   return config;
 }
@@ -209,7 +230,8 @@ async function main() {
       leaseTimeoutMs: config.broker.leaseTimeoutMs,
       maxRetries: config.broker.maxRetries,
       backoffInitialMs: config.broker.backoffInitialMs,
-      mailbox: config.mailbox,
+      projectList: config.projectList,
+      defaultProject: config.defaultProject,
       zrokManager
     });
 
@@ -233,7 +255,9 @@ async function main() {
         dispatchBroadcast: config.agents.Claude.dispatchBroadcast === true,
         brokerUrl,
         authToken: config.broker.authToken,
-        mailboxPath: config.mailbox.path
+        mailboxPath: config.mailbox.path,
+        projectId: config.mailbox.projectId,
+        headerFormat: config.mailbox.headerFormat
       });
       claude.start();
       adapters.push(claude);
@@ -246,7 +270,9 @@ async function main() {
         dispatchBroadcast: config.agents.Codex.dispatchBroadcast === true,
         brokerUrl,
         authToken: config.broker.authToken,
-        mailboxPath: config.mailbox.path
+        mailboxPath: config.mailbox.path,
+        projectId: config.mailbox.projectId,
+        headerFormat: config.mailbox.headerFormat
       });
       codex.start();
       adapters.push(codex);
@@ -259,7 +285,9 @@ async function main() {
         dispatchBroadcast: config.agents.Antigravity.dispatchBroadcast === true,
         brokerUrl,
         authToken: config.broker.authToken,
-        mailboxPath: config.mailbox.path
+        mailboxPath: config.mailbox.path,
+        projectId: config.mailbox.projectId,
+        headerFormat: config.mailbox.headerFormat
       });
       antigravity.start();
       adapters.push(antigravity);
