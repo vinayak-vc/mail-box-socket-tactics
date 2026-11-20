@@ -4,15 +4,23 @@
  * Provides CRUD for board tasks, column management, comments, and
  * real-time event broadcasting for the dashboard.
  *
- * Data is persisted to data/board.json.
+ * Data is persisted to data/board.json (one file per project).
+ *
+ * Concurrency: the broker and every MCP server process (one per desktop agent) open the same
+ * board file. Every change is an atomic read-modify-write under a cross-process file lock
+ * (`<board>.json.lock`): re-read the file inside the lock, apply the change, write it with
+ * temp-file + rename, release. Reads always come from disk, so no process acts on a stale copy.
  */
 
 const fs = require('fs');
 const path = require('path');
+const { withFileLockSync, writeJsonAtomicSync } = require('./FileLock');
 
 const DEFAULT_COLUMNS = ['backlog', 'todo', 'in-progress', 'review', 'done'];
 
 const PRIORITY_LEVELS = ['low', 'medium', 'high', 'critical'];
+
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 class BoardDomainService {
   constructor(options = {}) {
@@ -20,42 +28,84 @@ class BoardDomainService {
       path.resolve(__dirname, '../../data/board.json');
     this.onEvent = options.onEvent || (() => {});
     this.logger = options.logger || null;
+    this.lockTimeoutMs = options.lockTimeoutMs || 10000;
 
-    // Load persisted state
-    this._data = this._load();
+    // Last good copy read from disk; only a fallback if the file is briefly unreadable
+    this._data = this._emptyBoard();
+    this._refresh();
   }
 
   // ─── Persistence ────────────────────────────────────────────────
 
-  _load() {
-    try {
-      if (fs.existsSync(this.storagePath)) {
-        const raw = fs.readFileSync(this.storagePath, 'utf-8');
-        const parsed = JSON.parse(raw);
-        return {
-          columns: parsed.columns || DEFAULT_COLUMNS,
-          tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
-          nextId: parsed.nextId || 1
-        };
-      }
-    } catch (err) {
-      if (this.logger) {
-        this.logger.log({ level: 'WARN', type: 'BOARD_LOAD_ERROR', summary: `Board load error: ${err.message}` });
-      }
-    }
+  _emptyBoard() {
     return { columns: [...DEFAULT_COLUMNS], tasks: [], nextId: 1 };
   }
 
-  _save() {
-    try {
-      const dir = path.dirname(this.storagePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.storagePath, JSON.stringify(this._data, null, 2), 'utf-8');
-    } catch (err) {
-      if (this.logger) {
-        this.logger.log({ level: 'ERROR', type: 'BOARD_SAVE_ERROR', summary: `Board save error: ${err.message}` });
+  _normalize(parsed) {
+    const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+    // nextId must never go backwards, or a deleted/lost id could be issued twice
+    const maxNum = tasks.reduce((max, t) => {
+      const m = /^BT-(\d+)$/.exec(String(t.id || ''));
+      return m ? Math.max(max, parseInt(m[1], 10)) : max;
+    }, 0);
+    return {
+      columns: Array.isArray(parsed.columns) && parsed.columns.length ? parsed.columns : [...DEFAULT_COLUMNS],
+      tasks,
+      nextId: Math.max(parseInt(parsed.nextId, 10) || 1, maxNum + 1)
+    };
+  }
+
+  /**
+   * Reads the board from disk. Throws if the file exists but cannot be read or parsed after
+   * a few retries (a rename by another process can briefly make it unavailable on Windows).
+   */
+  _readFromDisk() {
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      try {
+        if (!fs.existsSync(this.storagePath)) return this._emptyBoard();
+        return this._normalize(JSON.parse(fs.readFileSync(this.storagePath, 'utf-8')));
+      } catch (err) {
+        lastErr = err;
+        sleepSync(10);
       }
     }
+    throw lastErr;
+  }
+
+  /** Refreshes the in-memory copy from disk; keeps the last good copy if the read fails. */
+  _refresh() {
+    try {
+      this._data = this._readFromDisk();
+    } catch (err) {
+      this._log('WARN', 'BOARD_LOAD_ERROR', `Board load error (using last good copy): ${err.message}`);
+    }
+    return this._data;
+  }
+
+  /** Kept for callers/tests that used the old name; same as a fresh read. */
+  _load() {
+    return this._refresh();
+  }
+
+  /**
+   * Atomic read-modify-write. mutator(data) changes data in place and returns a result.
+   * If the file cannot be parsed, nothing is written: a corrupt or half-read board must never
+   * be replaced by an empty one.
+   */
+  _mutate(mutator) {
+    const result = withFileLockSync(this.storagePath, () => {
+      const data = this._readFromDisk();
+      const out = mutator(data);
+      if (out && out.changed === false) {
+        this._data = data;
+        return out;
+      }
+      writeJsonAtomicSync(this.storagePath, data);
+      this._data = data;
+      return out;
+    }, { timeoutMs: this.lockTimeoutMs });
+    return result;
   }
 
   // ─── Board Read ─────────────────────────────────────────────────
@@ -64,11 +114,11 @@ class BoardDomainService {
    * Returns the full board state: columns and all tasks.
    */
   getBoard() {
-    this._data = this._load();
+    const data = this._refresh();
     return {
-      columns: this._data.columns,
-      tasks: this._data.tasks,
-      taskCount: this._data.tasks.length
+      columns: data.columns,
+      tasks: data.tasks,
+      taskCount: data.tasks.length
     };
   }
 
@@ -76,19 +126,14 @@ class BoardDomainService {
    * Get a single task by its ID.
    */
   getTask(taskId) {
-    let task = this._data.tasks.find(t => t.id === taskId);
-    if (!task) {
-      this._data = this._load();
-      task = this._data.tasks.find(t => t.id === taskId);
-    }
-    return task || null;
+    return this._refresh().tasks.find(t => t.id === taskId) || null;
   }
 
   /**
    * Get tasks filtered by column and/or assignee.
    */
   getTasks({ column, assignee, priority } = {}) {
-    let result = this._data.tasks;
+    let result = this._refresh().tasks;
     if (column) result = result.filter(t => t.column === column);
     if (assignee) result = result.filter(t => t.assignee && t.assignee.toLowerCase() === assignee.toLowerCase());
     if (priority) result = result.filter(t => t.priority === priority);
@@ -114,36 +159,38 @@ class BoardDomainService {
       throw new Error('Task title is required');
     }
 
-    const column = params.column || 'backlog';
-    if (!this._data.columns.includes(column)) {
-      throw new Error(`Invalid column '${column}'. Valid columns: ${this._data.columns.join(', ')}`);
-    }
-
     const priority = params.priority || 'medium';
     if (!PRIORITY_LEVELS.includes(priority)) {
       throw new Error(`Invalid priority '${priority}'. Valid: ${PRIORITY_LEVELS.join(', ')}`);
     }
 
-    const now = new Date().toISOString();
-    const task = {
-      id: `BT-${this._data.nextId++}`,
-      title: params.title.trim(),
-      description: (params.description || '').trim(),
-      column,
-      assignee: params.assignee || null,
-      priority,
-      labels: Array.isArray(params.labels) ? params.labels : [],
-      createdBy: params.createdBy || 'System',
-      createdAt: now,
-      updatedAt: now,
-      comments: [],
-      history: [
-        { action: 'created', by: params.createdBy || 'System', at: now, detail: `Task created in "${column}"` }
-      ]
-    };
+    const column = params.column || 'backlog';
 
-    this._data.tasks.push(task);
-    this._save();
+    const { task } = this._mutate((data) => {
+      if (!data.columns.includes(column)) {
+        throw new Error(`Invalid column '${column}'. Valid columns: ${data.columns.join(', ')}`);
+      }
+      const now = new Date().toISOString();
+      // The id comes from the freshly read file inside the lock, so it is never issued twice
+      const created = {
+        id: `BT-${data.nextId++}`,
+        title: params.title.trim(),
+        description: (params.description || '').trim(),
+        column,
+        assignee: params.assignee || null,
+        priority,
+        labels: Array.isArray(params.labels) ? params.labels : [],
+        createdBy: params.createdBy || 'System',
+        createdAt: now,
+        updatedAt: now,
+        comments: [],
+        history: [
+          { action: 'created', by: params.createdBy || 'System', at: now, detail: `Task created in "${column}"` }
+        ]
+      };
+      data.tasks.push(created);
+      return { task: created };
+    });
 
     this._broadcast('BOARD_TASK_CREATED', { task });
     this._log('INFO', 'BOARD_TASK_CREATED', `Board task ${task.id} created: "${task.title}" by ${task.createdBy}`);
@@ -155,33 +202,30 @@ class BoardDomainService {
    * Update a board task's fields (title, description, priority, labels, assignee).
    */
   updateTask(taskId, updates, updatedBy = 'System') {
-    const task = this.getTask(taskId);
-    if (!task) throw new Error(`Task '${taskId}' not found`);
-
     const allowed = ['title', 'description', 'priority', 'labels', 'assignee'];
-    const changes = [];
 
-    for (const key of allowed) {
-      if (updates[key] !== undefined) {
-        const oldVal = task[key];
-        task[key] = updates[key];
-        changes.push(`${key}: "${oldVal}" → "${updates[key]}"`);
+    const { task, changes, changed } = this._mutate((data) => {
+      const target = data.tasks.find(t => t.id === taskId);
+      if (!target) throw new Error(`Task '${taskId}' not found`);
+
+      const list = [];
+      for (const key of allowed) {
+        if (updates[key] !== undefined) {
+          const oldVal = target[key];
+          target[key] = updates[key];
+          list.push(`${key}: "${oldVal}" → "${updates[key]}"`);
+        }
       }
-    }
+      if (list.length === 0) return { task: target, changes: list, changed: false };
 
-    if (changes.length === 0) {
-      return task; // no-op
-    }
-
-    task.updatedAt = new Date().toISOString();
-    task.history.push({
-      action: 'updated',
-      by: updatedBy,
-      at: task.updatedAt,
-      detail: changes.join('; ')
+      target.updatedAt = new Date().toISOString();
+      target.history = Array.isArray(target.history) ? target.history : [];
+      target.history.push({ action: 'updated', by: updatedBy, at: target.updatedAt, detail: list.join('; ') });
+      return { task: target, changes: list, changed: true };
     });
 
-    this._save();
+    if (!changed) return task; // no-op
+
     this._broadcast('BOARD_TASK_UPDATED', { task });
     this._log('INFO', 'BOARD_TASK_UPDATED', `Board task ${task.id} updated by ${updatedBy}: ${changes.join('; ')}`);
 
@@ -192,26 +236,30 @@ class BoardDomainService {
    * Move a task to a different column (Kanban drag-and-drop).
    */
   moveTask(taskId, targetColumn, movedBy = 'System') {
-    const task = this.getTask(taskId);
-    if (!task) throw new Error(`Task '${taskId}' not found`);
+    const { task, fromColumn, changed } = this._mutate((data) => {
+      const target = data.tasks.find(t => t.id === taskId);
+      if (!target) throw new Error(`Task '${taskId}' not found`);
+      if (!data.columns.includes(targetColumn)) {
+        throw new Error(`Invalid column '${targetColumn}'. Valid columns: ${data.columns.join(', ')}`);
+      }
 
-    if (!this._data.columns.includes(targetColumn)) {
-      throw new Error(`Invalid column '${targetColumn}'. Valid columns: ${this._data.columns.join(', ')}`);
-    }
+      const from = target.column;
+      if (from === targetColumn) return { task: target, fromColumn: from, changed: false };
 
-    const fromColumn = task.column;
-    if (fromColumn === targetColumn) return task; // no-op
-
-    task.column = targetColumn;
-    task.updatedAt = new Date().toISOString();
-    task.history.push({
-      action: 'moved',
-      by: movedBy,
-      at: task.updatedAt,
-      detail: `Moved from "${fromColumn}" to "${targetColumn}"`
+      target.column = targetColumn;
+      target.updatedAt = new Date().toISOString();
+      target.history = Array.isArray(target.history) ? target.history : [];
+      target.history.push({
+        action: 'moved',
+        by: movedBy,
+        at: target.updatedAt,
+        detail: `Moved from "${from}" to "${targetColumn}"`
+      });
+      return { task: target, fromColumn: from, changed: true };
     });
 
-    this._save();
+    if (!changed) return task; // no-op
+
     this._broadcast('BOARD_TASK_MOVED', { task, fromColumn, toColumn: targetColumn });
     this._log('INFO', 'BOARD_TASK_MOVED', `Board task ${task.id} moved "${fromColumn}" → "${targetColumn}" by ${movedBy}`);
 
@@ -222,28 +270,31 @@ class BoardDomainService {
    * Add a comment to a task.
    */
   addComment(taskId, text, author = 'System') {
-    const task = this.getTask(taskId);
-    if (!task) throw new Error(`Task '${taskId}' not found`);
-
     if (!text || !text.trim()) throw new Error('Comment text is required');
 
-    const comment = {
-      id: `C${Date.now()}`,
-      author,
-      text: text.trim(),
-      createdAt: new Date().toISOString()
-    };
+    const { comment, task } = this._mutate((data) => {
+      const target = data.tasks.find(t => t.id === taskId);
+      if (!target) throw new Error(`Task '${taskId}' not found`);
 
-    task.comments.push(comment);
-    task.updatedAt = comment.createdAt;
-    task.history.push({
-      action: 'commented',
-      by: author,
-      at: comment.createdAt,
-      detail: text.trim().substring(0, 120)
+      const created = {
+        id: `C${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+        author,
+        text: text.trim(),
+        createdAt: new Date().toISOString()
+      };
+      target.comments = Array.isArray(target.comments) ? target.comments : [];
+      target.comments.push(created);
+      target.updatedAt = created.createdAt;
+      target.history = Array.isArray(target.history) ? target.history : [];
+      target.history.push({
+        action: 'commented',
+        by: author,
+        at: created.createdAt,
+        detail: text.trim().substring(0, 120)
+      });
+      return { comment: created, task: target };
     });
 
-    this._save();
     this._broadcast('BOARD_TASK_COMMENT', { taskId: task.id, comment });
     this._log('INFO', 'BOARD_TASK_COMMENT', `Comment on ${task.id} by ${author}`);
 
@@ -254,11 +305,12 @@ class BoardDomainService {
    * Delete a board task.
    */
   deleteTask(taskId, deletedBy = 'System') {
-    const idx = this._data.tasks.findIndex(t => t.id === taskId);
-    if (idx === -1) throw new Error(`Task '${taskId}' not found`);
-
-    const removed = this._data.tasks.splice(idx, 1)[0];
-    this._save();
+    const { removed } = this._mutate((data) => {
+      const idx = data.tasks.findIndex(t => t.id === taskId);
+      if (idx === -1) throw new Error(`Task '${taskId}' not found`);
+      // nextId is left as is, so the deleted id is never reissued
+      return { removed: data.tasks.splice(idx, 1)[0] };
+    });
 
     this._broadcast('BOARD_TASK_DELETED', { taskId, task: removed });
     this._log('WARN', 'BOARD_TASK_DELETED', `Board task ${taskId} deleted by ${deletedBy}`);
@@ -283,7 +335,7 @@ class BoardDomainService {
   // ─── Column Management ──────────────────────────────────────────
 
   getColumns() {
-    return [...this._data.columns];
+    return [...this._refresh().columns];
   }
 
   // ─── Helpers ────────────────────────────────────────────────────

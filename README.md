@@ -187,6 +187,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\test_powershell_integr
 - **Hardening Suite (`tests/test_hardening_suite.js`):** 15/15 Passed
 - **Email Service Suite (`tests/test_email_service.js`):** 5/5 Passed
 - **Multi-Project Suite (`tests/test_projects_suite.js`, `npm run test:projects`):** 32/32 Passed. Covers config loading (legacy + multi), the tel header format (date-only, date+time and ISO timestamps; the post script writes local time), per-project isolation (HTTP, WebSocket, board, logs), concurrent sessions of one agent, concurrent posters (8 processes, unique MSG numbers; an abandoned mutex), duplicate-id warnings, and the MCP `project` argument.
+- **Board Concurrency Suite (`tests/test_board_concurrency.js`, `npm run test:board`):** 8/8 Passed. Separate Node processes move, comment on and create tasks on one `board.json` at the same moment; every write must persist, ids are never reissued, a corrupt file is never overwritten, and stale locks from dead processes are taken over. Board writes are a read-modify-write under `<board>.json.lock` with an atomic temp-file + rename (`src/domain/FileLock.js`).
 - **PowerShell Integration Suite (`tests/test_powershell_integration.ps1`):** 5/5 Passed
 
 ---
