@@ -1619,9 +1619,10 @@ class EventBroker {
         return res.end(JSON.stringify({ error: 'Task not found' }));
       }
 
-      task.status = 'CANCELLED';
-      task.lastError = 'Cancelled by administrator via Control Center';
-      ctx.stateStore.save();
+      ctx.stateStore.updateTask(taskId, (t) => {
+        t.status = 'CANCELLED';
+        t.lastError = 'Cancelled by administrator via Control Center';
+      });
 
       this.logger.log({
         level: 'WARN',
@@ -2050,9 +2051,7 @@ class EventBroker {
       try { await this.zrokManager.stop(); } catch (_) {}
     }
 
-    for (const ctx of this.projects.values()) {
-      ctx.stateStore.save();
-    }
+    // StateStore persists every change itself under a file lock; nothing to flush here
     this.agentRegistry.save();
     console.log('[EventBroker] Broker stopped cleanly');
   }

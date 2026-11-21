@@ -13,6 +13,18 @@ import {
 } from 'lucide-react';
 import { MailboxMessage, SystemSnapshot } from '../types';
 import { client } from '../api';
+import { Markdown, markdownToPlainText } from '../components/Markdown';
+
+const VIEW_MODE_KEY = 'mst_message_view';
+type ViewMode = 'rendered' | 'raw';
+
+const loadViewMode = (): ViewMode => {
+  try {
+    return localStorage.getItem(VIEW_MODE_KEY) === 'raw' ? 'raw' : 'rendered';
+  } catch (_) {
+    return 'rendered';
+  }
+};
 
 interface MailboxViewProps {
   snapshot: SystemSnapshot | null;
@@ -24,6 +36,7 @@ export const MailboxView: React.FC<MailboxViewProps> = ({ snapshot, onRefresh })
   const [senderFilter, setSenderFilter] = useState('all');
   const [selectedMessage, setSelectedMessage] = useState<MailboxMessage | null>(null);
   const [copied, setCopied] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
   
   // Compose modal state
   const [showCompose, setShowCompose] = useState(false);
@@ -71,6 +84,11 @@ export const MailboxView: React.FC<MailboxViewProps> = ({ snapshot, onRefresh })
     }
   };
 
+  const changeViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    try { localStorage.setItem(VIEW_MODE_KEY, mode); } catch (_) { /* storage unavailable: keep in memory only */ }
+  };
+
   const copyMessage = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -82,10 +100,14 @@ export const MailboxView: React.FC<MailboxViewProps> = ({ snapshot, onRefresh })
     const lines = body.split('\n');
     for (const l of lines) {
       const trimmed = l.trim();
-      if (trimmed.startsWith('TASK:')) return trimmed.substring(5).trim();
-      if (trimmed.startsWith('FINDINGS:')) return trimmed.substring(9).trim();
+      // Agents often bold the labels: **TASK:** ...
+      const plain = markdownToPlainText(trimmed);
+      if (plain.startsWith('TASK:')) return plain.substring(5).trim();
+      if (plain.startsWith('Subject:')) return plain.substring(8).trim();
+      if (plain.startsWith('FINDINGS:')) return plain.substring(9).trim();
     }
-    return lines[0]?.substring(0, 80) || 'Task Notification';
+    const firstText = lines.map(l => markdownToPlainText(l)).find(l => l.length > 0);
+    return firstText?.substring(0, 80) || 'Task Notification';
   };
 
   return (
@@ -158,7 +180,7 @@ export const MailboxView: React.FC<MailboxViewProps> = ({ snapshot, onRefresh })
                 </div>
 
                 <div style={{ fontSize: '12px', color: 'var(--text-secondary)', maxLines: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {m.body.replace(/\r?\n/g, ' ')}
+                  {markdownToPlainText(m.body)}
                 </div>
               </div>
             );
@@ -188,11 +210,29 @@ export const MailboxView: React.FC<MailboxViewProps> = ({ snapshot, onRefresh })
                 <span>Timestamp: {selectedMessage.timestamp}</span>
               </div>
 
-              <div className="form-label">Message Content</div>
-              <div className="code-preview" style={{ maxHeight: '400px' }}>
-                {/* Show the real heading so tel-format messages keep their "| time | STATUS" columns */}
-                {`${selectedMessage.headerLine || `### [${selectedMessage.id}] ${selectedMessage.sender} -> ${selectedMessage.recipientRaw}, ${selectedMessage.timestamp}`}\n${selectedMessage.body}`}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div className="form-label" style={{ margin: 0 }}>Message Content</div>
+                <div className="view-toggle" role="group" aria-label="Message view">
+                  <button className={viewMode === 'rendered' ? 'active' : ''} onClick={() => changeViewMode('rendered')}>Rendered</button>
+                  <button className={viewMode === 'raw' ? 'active' : ''} onClick={() => changeViewMode('raw')}>Raw</button>
+                </div>
               </div>
+              {/* The real heading is kept so tel-format messages show their "| time | STATUS" columns */}
+              {(() => {
+                const heading = selectedMessage.headerLine || `### [${selectedMessage.id}] ${selectedMessage.sender} -> ${selectedMessage.recipientRaw}, ${selectedMessage.timestamp}`;
+                return viewMode === 'raw' ? (
+                  <div className="code-preview" style={{ maxHeight: '400px' }}>
+                    {`${heading}\n${selectedMessage.body}`}
+                  </div>
+                ) : (
+                  <div className="md-panel">
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid var(--border-subtle)', wordBreak: 'break-all' }}>
+                      {heading}
+                    </div>
+                    <Markdown source={selectedMessage.body} />
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="modal-footer">

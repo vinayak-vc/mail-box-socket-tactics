@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { SystemSnapshot, BoardTask, BoardColumn, BoardPriority, BoardComment } from '../types';
 import { client } from '../api';
+import { Markdown } from '../components/Markdown';
 
 interface KanbanBoardViewProps {
   snapshot: SystemSnapshot | null;
@@ -533,9 +534,7 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
             {selectedTask.description && (
               <div style={{ padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                 <div className="form-label">Description</div>
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
-                  {selectedTask.description}
-                </p>
+                <Markdown source={selectedTask.description} />
               </div>
             )}
 
@@ -585,9 +584,7 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
                         {timeAgo(c.createdAt)}
                       </span>
                     </div>
-                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.4', margin: 0, whiteSpace: 'pre-wrap' }}>
-                      {c.text}
-                    </p>
+                    <Markdown source={c.text} />
                   </div>
                 ))}
               </div>

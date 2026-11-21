@@ -110,8 +110,7 @@ class TaskDomainService {
     if (status === PROCESSING_STATUS.RUNNING) {
       this.stateStore.markRunning(messageId, workerId || task.claimOwner);
     } else {
-      task.status = status;
-      this.stateStore.save();
+      this.stateStore.updateTask(messageId, (t) => { t.status = status; });
     }
 
     this._recordHistory(messageId, status, { agentId, details });
@@ -202,9 +201,10 @@ class TaskDomainService {
     const task = this.stateStore.getTask(messageId);
     if (!task) throw new Error(`Task ${messageId} not found`);
 
-    task.status = 'CANCELLED';
-    task.lastError = reason;
-    this.stateStore.save();
+    this.stateStore.updateTask(messageId, (t) => {
+      t.status = 'CANCELLED';
+      t.lastError = reason;
+    });
 
     this._recordHistory(messageId, 'CANCELLED', { reason });
     this.onEvent('TASK_LIFECYCLE', { messageId, status: 'CANCELLED', reason });
