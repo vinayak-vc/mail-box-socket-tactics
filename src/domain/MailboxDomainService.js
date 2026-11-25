@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { parseMailboxMessages, isRecipientMatch, normalizeAgentId } = require('../protocol/MessageProtocol');
+const { resolvePowerShellExecutable, powerShellEnvironment } = require('../protocol/PowerShellExecutable');
 
 class MailboxDomainService {
   constructor(options = {}) {
@@ -175,7 +176,7 @@ class MailboxDomainService {
         args.push('-AuthToken', tok);
       }
 
-      const ps = spawn('powershell.exe', args, { shell: false });
+      const ps = spawn(resolvePowerShellExecutable(), args, { shell: false, env: powerShellEnvironment() });
       let stdout = '';
       let stderr = '';
 

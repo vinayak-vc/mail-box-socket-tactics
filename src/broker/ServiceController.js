@@ -8,6 +8,7 @@ const { spawn, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { resolvePowerShellExecutable, powerShellEnvironment } = require('../protocol/PowerShellExecutable');
 
 const ALLOWED_ACTIONS = new Set(['start', 'stop', 'restart', 'status']);
 const ALLOWED_TARGETS = new Set(['all', 'broker', 'adapters']);
@@ -144,7 +145,7 @@ class ServiceController {
       if (!currentPid) {
         // Even if Node is stopped, ensure lingering zrok shares/processes are released
         try {
-          execFile('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-File', this.serviceControlScript, '-Action', 'stop'], { timeout: 8000 }, () => {});
+          execFile(resolvePowerShellExecutable(), ['-ExecutionPolicy', 'Bypass', '-File', this.serviceControlScript, '-Action', 'stop'], { timeout: 8000, env: powerShellEnvironment() }, () => {});
         } catch (_) {}
 
         return {
@@ -173,7 +174,7 @@ class ServiceController {
 
       // Release any lingering zrok cloud shares
       try {
-        execFile('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-File', this.serviceControlScript, '-Action', 'stop'], { timeout: 8000 }, () => {});
+        execFile(resolvePowerShellExecutable(), ['-ExecutionPolicy', 'Bypass', '-File', this.serviceControlScript, '-Action', 'stop'], { timeout: 8000, env: powerShellEnvironment() }, () => {});
       } catch (_) {}
 
       return {
