@@ -13,10 +13,13 @@ import {
   AlertCircle,
   Trash2,
   Edit3,
-  GripVertical
+  GripVertical,
+  SlidersHorizontal,
+  Archive,
+  ArchiveRestore
 } from 'lucide-react';
 import { SystemSnapshot, BoardTask, BoardColumn, BoardPriority, BoardComment } from '../types';
-import { client } from '../api';
+import { client, getProject } from '../api';
 import { Markdown } from '../components/Markdown';
 
 interface KanbanBoardViewProps {
@@ -45,7 +48,42 @@ const AGENT_COLORS: Record<string, string> = {
   'Antigravity': '#3b82f6',
 };
 
+// ── Board display settings ───────────────────────────────
+// Convention: a card labelled "archive" is old and can be filtered out. It stays on the board
+// (nothing is deleted or moved); it is only hidden from view unless "Show archived" is on.
+export const ARCHIVE_LABEL = 'archive';
+const isArchived = (t: BoardTask) => (t.labels || []).some(l => l.trim().toLowerCase() === ARCHIVE_LABEL);
+
+type DoneLimit = 'all' | '5' | '10' | '20' | '50' | '0'; // '0' = hide the Done column's cards
+interface BoardSettings {
+  doneLimit: DoneLimit;      // how many of the most recently updated Done cards to show
+  showArchived: boolean;     // include cards labelled "archive"
+}
+const DEFAULT_SETTINGS: BoardSettings = { doneLimit: 'all', showArchived: false };
+const DONE_LIMIT_OPTIONS: { value: DoneLimit; label: string }[] = [
+  { value: 'all', label: 'Show all Done cards' },
+  { value: '5', label: 'Latest 5' },
+  { value: '10', label: 'Latest 10' },
+  { value: '20', label: 'Latest 20' },
+  { value: '50', label: 'Latest 50' },
+  { value: '0', label: 'Hide Done cards' },
+];
+
+// Settings are remembered per browser and per project
+const settingsKey = () => `mst_board_settings_${getProject() || 'default'}`;
+const loadSettings = (): BoardSettings => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(settingsKey()) || 'null');
+    const limit = DONE_LIMIT_OPTIONS.some(o => o.value === raw?.doneLimit) ? raw.doneLimit : DEFAULT_SETTINGS.doneLimit;
+    return { doneLimit: limit, showArchived: raw?.showArchived === true };
+  } catch (_) {
+    return DEFAULT_SETTINGS;
+  }
+};
+
 export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRefresh }) => {
+  const [settings, setSettings] = useState<BoardSettings>(loadSettings);
+  const [showSettings, setShowSettings] = useState(false);
   const [selectedTask, setSelectedTask] = useState<BoardTask | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createColumn, setCreateColumn] = useState<BoardColumn>('backlog');
@@ -67,8 +105,75 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
   const tasks = board?.tasks || [];
   const agents = snapshot?.agents || [];
 
-  const getTasksForColumn = (col: string) =>
-    tasks.filter(t => t.column === col);
+  const updateSettings = (patch: Partial<BoardSettings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    try { localStorage.setItem(settingsKey(), JSON.stringify(next)); } catch (_) { /* storage unavailable: keep in memory only */ }
+  };
+
+  // Cards shown in a column, after the archive filter and (for Done) the "latest N" limit
+  const archivedCount = tasks.filter(isArchived).length;
+  const getColumnView = (col: string) => {
+    const inColumn = tasks.filter(t => t.column === col);
+    const unarchived = inColumn.filter(t => !isArchived(t));
+    const archivedHere = inColumn.length - unarchived.length;
+    let visible = settings.showArchived ? inColumn : unarchived;
+    let hiddenByLimit = 0;
+    if (col === 'done') {
+      // Newest first, so "latest N" is also what you see at the top
+      visible = visible.slice().sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      if (settings.doneLimit !== 'all') {
+        const limit = parseInt(settings.doneLimit, 10);
+        hiddenByLimit = Math.max(0, visible.length - limit);
+        visible = visible.slice(0, limit);
+      }
+    }
+    return {
+      visible,
+      hiddenByLimit,
+      hiddenArchived: settings.showArchived ? 0 : archivedHere,
+      total: inColumn.length
+    };
+  };
+  const hiddenTotal = columns.reduce((sum, c) => {
+    const v = getColumnView(c);
+    return sum + v.hiddenByLimit + v.hiddenArchived;
+  }, 0);
+
+  // ── Archive / Unarchive (adds or removes the "archive" label) ──
+  const handleToggleArchive = async (task: BoardTask) => {
+    const labels = isArchived(task)
+      ? task.labels.filter(l => l.trim().toLowerCase() !== ARCHIVE_LABEL)
+      : [...task.labels, ARCHIVE_LABEL];
+    try {
+      const updated = await client.updateBoardTask(task.id, { labels, updatedBy: 'Dashboard' });
+      if (selectedTask?.id === task.id) setSelectedTask(updated);
+      onRefresh();
+    } catch (err: any) {
+      alert(`Archive failed: ${err.message}`);
+    }
+  };
+
+  // Labels every Done card not touched for N days as "archive" (one request per card)
+  const handleArchiveOldDone = async (days: number) => {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const old = tasks.filter(t => t.column === 'done' && !isArchived(t) && new Date(t.updatedAt).getTime() < cutoff);
+    if (old.length === 0) {
+      alert(`No Done cards older than ${days} days.`);
+      return;
+    }
+    if (!confirm(`Label ${old.length} Done card(s) older than ${days} days as "${ARCHIVE_LABEL}"?\nThey stay on the board and can be shown again with "Show archived".`)) return;
+    let failed = 0;
+    for (const t of old) {
+      try {
+        await client.updateBoardTask(t.id, { labels: [...t.labels, ARCHIVE_LABEL], updatedBy: 'Dashboard' });
+      } catch (_) {
+        failed++;
+      }
+    }
+    if (failed > 0) alert(`${failed} card(s) could not be archived.`);
+    onRefresh();
+  };
 
   // ── Create Task ──────────────────────────────────────────
   const handleCreate = async () => {
@@ -195,15 +300,84 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
           </h2>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>
             Drag-and-drop task board for agent collaboration. {tasks.length} task{tasks.length !== 1 ? 's' : ''} across {columns.length} columns.
+            {hiddenTotal > 0 && (
+              <>
+                {' '}<strong style={{ color: 'var(--text-secondary)' }}>{hiddenTotal} hidden</strong>
+                {' '}(<button
+                  onClick={() => updateSettings({ doneLimit: 'all', showArchived: true })}
+                  style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-primary)', cursor: 'pointer', fontSize: 'inherit', textDecoration: 'underline' }}
+                >show everything</button>)
+              </>
+            )}
           </p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => { setCreateColumn('backlog'); setShowCreateModal(true); }}
-        >
-          <Plus size={14} />
-          <span>New Task</span>
-        </button>
+        <div style={{ display: 'flex', gap: '8px', position: 'relative' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowSettings(v => !v)}
+            aria-expanded={showSettings}
+            title="Board settings"
+          >
+            <SlidersHorizontal size={14} />
+            <span>View</span>
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => { setCreateColumn('backlog'); setShowCreateModal(true); }}
+          >
+            <Plus size={14} />
+            <span>New Task</span>
+          </button>
+
+          {showSettings && (
+            <div
+              role="dialog"
+              aria-label="Board settings"
+              style={{
+                position: 'absolute', top: '100%', right: 0, marginTop: '8px', zIndex: 20, width: '300px',
+                background: 'var(--bg-card)', border: '1px solid var(--border-accent)', borderRadius: '10px',
+                padding: '14px', boxShadow: '0 12px 32px rgba(0,0,0,0.45)'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>Board settings</strong>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowSettings(false)} aria-label="Close settings"><X size={12} /></button>
+              </div>
+
+              <div className="form-label">Done column</div>
+              <select
+                className="select-filter"
+                value={settings.doneLimit}
+                onChange={(e) => updateSettings({ doneLimit: e.target.value as DoneLimit })}
+                style={{ width: '100%', fontSize: '12px', marginBottom: '12px' }}
+              >
+                {DONE_LIMIT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)', cursor: 'pointer', marginBottom: '4px' }}>
+                <input
+                  type="checkbox"
+                  checked={settings.showArchived}
+                  onChange={(e) => updateSettings({ showArchived: e.target.checked })}
+                />
+                Show archived cards ({archivedCount})
+              </label>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 12px 22px', lineHeight: 1.4 }}>
+                Archived = a card with the <code>{ARCHIVE_LABEL}</code> label. It stays on the board; it is only hidden.
+              </p>
+
+              <div className="form-label">Archive old Done cards</div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {[7, 14, 30].map(d => (
+                  <button key={d} className="btn btn-secondary btn-sm" onClick={() => handleArchiveOldDone(d)}>
+                    <Archive size={11} />
+                    <span>older than {d}d</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Board */}
@@ -216,7 +390,8 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
       }}>
         {columns.map((col) => {
           const config = COLUMN_CONFIG[col as BoardColumn] || { label: col, color: '#6b7280', icon: '📋' };
-          const colTasks = getTasksForColumn(col);
+          const colView = getColumnView(col);
+          const colTasks = colView.visible;
 
           return (
             <div
@@ -255,7 +430,7 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
                     borderRadius: '10px',
                     fontWeight: 600
                   }}>
-                    {colTasks.length}
+                    {colView.hiddenByLimit + colView.hiddenArchived > 0 ? `${colTasks.length} of ${colView.total}` : colTasks.length}
                   </span>
                 </div>
                 <button
@@ -291,7 +466,7 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
                     fontSize: '12px',
                     opacity: 0.6
                   }}>
-                    No tasks
+                    {colView.total > 0 ? 'All cards hidden by board settings' : 'No tasks'}
                   </div>
                 )}
 
@@ -313,6 +488,7 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
                         border: '1px solid var(--border-subtle)',
                         transition: 'border-color 0.15s, box-shadow 0.15s',
                         position: 'relative',
+                        opacity: isArchived(task) ? 0.55 : 1,
                       }}
                       onMouseEnter={(e) => {
                         (e.currentTarget as HTMLDivElement).style.borderColor = config.color;
@@ -351,6 +527,11 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
                         }}>
                           {prioConfig.label}
                         </span>
+                        {isArchived(task) && (
+                          <span style={{ fontSize: '9px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                            <Archive size={9} /> archived
+                          </span>
+                        )}
                       </div>
 
                       {/* Title */}
@@ -461,6 +642,23 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
                     </div>
                   );
                 })}
+
+                {(colView.hiddenByLimit > 0 || colView.hiddenArchived > 0) && (
+                  <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', padding: '6px 4px' }}>
+                    {[
+                      colView.hiddenByLimit > 0 ? `${colView.hiddenByLimit} older hidden` : null,
+                      colView.hiddenArchived > 0 ? `${colView.hiddenArchived} archived hidden` : null
+                    ].filter(Boolean).join(' · ')}
+                    {' · '}
+                    <button
+                      onClick={() => updateSettings({
+                        doneLimit: colView.hiddenByLimit > 0 ? 'all' : settings.doneLimit,
+                        showArchived: colView.hiddenArchived > 0 ? true : settings.showArchived
+                      })}
+                      style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-primary)', cursor: 'pointer', fontSize: 'inherit', textDecoration: 'underline' }}
+                    >show</button>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -478,6 +676,14 @@ export const KanbanBoardView: React.FC<KanbanBoardViewProps> = ({ snapshot, onRe
                 <h3 style={{ fontSize: '16px', color: '#fff', marginTop: '4px', lineHeight: '1.3' }}>{selectedTask.title}</h3>
               </div>
               <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleToggleArchive(selectedTask)}
+                  title={isArchived(selectedTask) ? 'Remove the archive label' : `Add the "${ARCHIVE_LABEL}" label (hides it from the board)`}
+                >
+                  {isArchived(selectedTask) ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+                  <span>{isArchived(selectedTask) ? 'Unarchive' : 'Archive'}</span>
+                </button>
                 <button className="btn btn-danger btn-sm" onClick={() => handleDelete(selectedTask.id)} title="Delete task">
                   <Trash2 size={12} />
                 </button>
